@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { Alert, Button, cn } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
@@ -43,19 +43,15 @@ export function AgentRunner({ onComplete, prompt }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [finished, setFinished] = useState<AgentStep | null>(null);
 
+  // The prompt that was showing when the current run started. Comparing against
+  // it tells us whether an incoming recommendation is newer than the last run's
+  // result — without which `finished` sticks around and permanently suppresses
+  // every later prompt, so logging a skip after a successful run looks like
+  // nothing happened. Derived rather than synced in an effect.
+  const [promptAtRun, setPromptAtRun] = useState<string | null>(null);
+
   // Guards against a double-click starting two concurrent runs.
   const runningRef = useRef(false);
-
-  // A new recommendation supersedes the previous run's result. Without this the
-  // last run's `finished` state sticks around and permanently suppresses every
-  // later prompt — so logging a skip after a successful run looks like nothing
-  // happened.
-  useEffect(() => {
-    if (prompt) {
-      setFinished(null);
-      setSteps([]);
-    }
-  }, [prompt]);
 
   const run = useCallback(
     async (forceReplan: boolean) => {
@@ -66,6 +62,7 @@ export function AgentRunner({ onComplete, prompt }: Props) {
       setError(null);
       setSteps([]);
       setFinished(null);
+      setPromptAtRun(prompt ?? null);
 
       try {
         for await (const step of api.agent.stream(forceReplan)) {
@@ -95,14 +92,17 @@ export function AgentRunner({ onComplete, prompt }: Props) {
         runningRef.current = false;
       }
     },
-    [onComplete],
+    [onComplete, prompt],
   );
 
   const decision = finished?.decision as AgentDecision | undefined;
 
+  // A recommendation the current result doesn't already account for.
+  const promptIsNew = prompt != null && prompt !== promptAtRun;
+
   return (
     <div className="space-y-4">
-      {prompt && !running && !finished && (
+      {promptIsNew && !running && (
         <Alert tone="warning" title="Kaya noticed something">
           {prompt}
         </Alert>
@@ -168,7 +168,7 @@ export function AgentRunner({ onComplete, prompt }: Props) {
         </ol>
       )}
 
-      {finished && !error && decision && (
+      {finished && !promptIsNew && !error && decision && (
         <Alert tone="success" title={DECISION_LABELS[decision] ?? "Done"}>
           {decision === "no_action"
             ? "Nothing needed changing — your plan still fits."

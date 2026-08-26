@@ -1,340 +1,227 @@
-# 🍏 Autonomous Health & Nutrition Coach Agent
+# Kaya — an autonomous nutrition coach that replans when life happens
 
-> An intelligent AI agent that autonomously generates and adapts personalized health plans using agentic reasoning with LangGraph
+> *Kaya* (काय) — Sanskrit for "body."
 
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+**Every nutrition app is a logging app. Kaya is a planning agent.**
 
-**🔗 [Live Demo - Coming Soon](#)** | **📹 [Video Demo - Coming Soon](#)**
+MyFitnessPal will tell you that you ate 2,400 calories. It will not change your dinner
+because you skipped lunch. The plan stays frozen; the human is expected to adapt.
 
----
+Kaya inverts that. When you skip a meal, blow past your target, or fall off three days
+running, a LangGraph agent notices, decides what kind of change is warranted, and rewrites
+your week — without being asked.
 
-## 🎯 Overview
+📄 **[Full problem statement](docs/PROBLEM_STATEMENT.md)** ·
+🛠 **[Architecture & setup](#running-it-locally)** ·
+🚚 **[Migrating from the Streamlit version](docs/MIGRATION.md)**
 
-An agentic AI system that demonstrates autonomous decision-making for personalized health coaching. The agent evaluates user progress, decides when replanning is needed, and generates adaptive meal and activity plans **without human intervention**.
-
-### Why This Matters
-
-Traditional health apps require constant manual input. This agent:
-- ✅ **Autonomously evaluates** progress using health metrics
-- ✅ **Decides independently** when plan adjustments are needed
-- ✅ **Generates personalized plans** using LLM reasoning
-- ✅ **Adapts continuously** based on compliance data
+![Landing page](docs/screenshots/landing.png)
 
 ---
 
-## ✨ Key Features
-
-### 🤖 Autonomous Reasoning
-Uses **LangGraph** state machines for complex decision-making workflows. The agent autonomously:
-- Fetches current health data and plans
-- Evaluates compliance against goals
-- Decides if replanning is necessary
-- Generates new personalized plans when needed
-
-### 🧠 LLM-Powered Planning
-- **OpenAI GPT-4** integration with structured outputs
-- Natural language meal suggestions
-- Context-aware activity recommendations
-- Reasoning explanations for every decision
-
-### 💾 Persistent Memory
-- **MongoDB Atlas** for long-term plan storage
-- Historical tracking of user progress
-- Plan versioning and retrieval
-
-### 🔄 Adaptive Learning
-Agent automatically adjusts plans when:
-- Calorie consumption exceeds target by 20%+
-- Daily step count falls below 5,000
-- Other compliance thresholds are breached
-
-### 📊 Interactive UI
-- Real-time plan visualization with **Streamlit**
-- Daily meal and activity breakdown
-- Progress tracking (coming soon)
-
----
-
-## 🏗️ System Architecture
+## The loop
 
 ```
-┌─────────────────┐
-│  Streamlit UI   │  ← User Interface
-└────────┬────────┘
-         │
-┌────────▼─────────────────────────┐
-│   LangGraph Agent Workflow       │
-│  ┌──────────────────────────┐   │
-│  │ 1. Fetch Data Node       │   │
-│  │ 2. Evaluate Progress     │   │
-│  │ 3. Planning Agent Node   │   │
-│  └──────────────────────────┘   │
-└────────┬─────────────────────────┘
-         │
-    ┌────▼─────┐      ┌──────────┐
-    │ OpenAI   │      │ MongoDB  │
-    │ GPT-4    │      │  Atlas   │
-    └──────────┘      └──────────┘
+   SENSE            EVALUATE           DECIDE            ACT
+   ─────            ────────           ──────            ───
+   meal logs   →   adherence      →   should we    →   regenerate
+   skips           vs. targets        replan? what      affected days
+   weight          trend + streaks    kind?             + explain why
+      ▲                                                      │
+      └────────────────── persist ◄──────────────────────────┘
 ```
 
-### Agent Workflow
+Concretely — you mark lunch as skipped:
 
-1. **Data Collection**: Fetches current plan and daily health logs
-2. **Progress Evaluation**: Analyzes compliance using custom metrics
-3. **Decision Making**: Autonomously decides if replanning is needed
-4. **Plan Generation**: Uses LLM to create personalized health plans
-5. **Persistence**: Saves plan to MongoDB for future reference
+1. **Sense** — the skip lands in the log store.
+2. **Evaluate** — plain Python computes the remaining calorie and protein budget, the skip
+   streak, and the 7-day adherence rate.
+3. **Decide** — one skip rebalances today's remaining meals. Three days of skipped
+   breakfasts restructures the plan, because at that point the plan is what's wrong.
+4. **Act** — the LLM regenerates within your diet type, allergies, budget and prep time,
+   and writes a plain-language rationale.
+5. **Persist** — saved as a new version, so the whole decision history stays browsable.
 
----
-
-## 🛠️ Technical Stack
-
-| Component | Technology |
-|-----------|-----------|
-| **AI Framework** | LangChain, LangGraph |
-| **LLM** | OpenAI GPT-4 |
-| **Database** | MongoDB Atlas |
-| **Frontend** | Streamlit |
-| **Language** | Python 3.10+ |
-| **Data Validation** | Pydantic |
+![Dashboard after an adaptive rebalance](docs/screenshots/dashboard-rebalanced.png)
 
 ---
 
-## 🚀 Getting Started
+## What makes it more than a prompt wrapper
 
-### Prerequisites
+### The agent is a real state machine
 
-- Python 3.10 or higher
-- OpenAI API key ([Get one here](https://platform.openai.com/api-keys))
-- MongoDB Atlas account ([Free tier available](https://cloud.mongodb.com))
+```
+sense ──► evaluate ──► decide ──┬─(no action)─────────────────► record ──► END
+                                │
+                                └─(plan needed)──► generate ──► validate
+                                                       ▲            │
+                                                       │            ├─(valid)──► persist ──► END
+                                                       └─(retry)────┘
+```
 
-### Installation
+`decide` branches four ways from computed evidence. `validate` routes *backwards* to
+`generate`, handing the model the specific errors that got its plan rejected. That cycle
+is the difference between an agent and a function call.
 
-1. **Clone the repository**
+### Deterministic guardrails wrap LLM judgment
+
+Nutrition is a domain where a hallucination is a health risk, so the work is split:
+
+| Owned by Python | Owned by the LLM |
+|---|---|
+| BMR/TDEE (Mifflin-St Jeor) | Which foods |
+| Calorie floors, deficit clamps | How to sequence a week |
+| Protein and fat minimums | Recipes and phrasing |
+| The decision to replan | How to explain a change |
+
+**The LLM picks the food. It never picks the numbers.**
+
+A validation layer then rejects any plan that violates the user's diet type, contains a
+declared allergen, misses the protein floor, drifts outside calorie tolerance, or claims
+macros that don't reconcile with its own calorie count. Rejected plans are regenerated
+with targeted feedback, up to three attempts.
+
+### Diet types modelled properly
+
+"Vegetarian" is not one thing. Kaya models **vegetarian, eggetarian, vegan, Jain,
+non-vegetarian and halal** as first-class constraints — Jain excludes root vegetables,
+vegan protein needs deliberate planning, eggetarian leans on eggs at breakfast. A plan you
+won't eat has an adherence rate of zero, however good its macros are.
+
+![Onboarding — diet selection](docs/screenshots/onboarding-diet.png)
+
+### It explains itself
+
+Every plan carries an `agent_reasoning`. Every run — *including the ones that change
+nothing* — is written to a decision timeline. "The agent checked and you're fine" and "the
+agent never ran" are different states, and the UI shows which one you're in.
+
+---
+
+## Stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Frontend | Next.js 16, TypeScript, Tailwind v4 | Real routing, SSE streaming, deploys to Vercel without a cold boot |
+| Backend | FastAPI, async | Native Pydantic — the same models the agent speaks — plus generated OpenAPI docs |
+| Agent | LangGraph | The graph *is* the documentation of the behaviour |
+| LLM | Groq / Llama 3.3 70B | Fast and free, behind a provider interface — swapping to GPT-4o is a config change |
+| Database | MongoDB (Motor) | Plans are deeply nested, schema-evolving documents |
+| Auth | JWT + bcrypt | Stateless, multi-tenant, no cookie/CSRF machinery |
+
+---
+
+## Running it locally
+
+**Prerequisites:** Python 3.11+, Node 18+, a MongoDB connection string, and a
+[free Groq API key](https://console.groq.com).
+
+### Backend
+
 ```bash
-git clone https://github.com/pranjalsharma-6/health-coach-agent.git
-cd health-coach-agent
-```
-
-2. **Create virtual environment**
-```bash
-python -m venv coach-env
-
-# Windows
-coach-env\Scripts\activate
-
-# Mac/Linux
-source coach-env/bin/activate
-```
-
-3. **Install dependencies**
-```bash
+cd backend
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+
+cp .env.example .env             # fill in MONGODB_URI, GROQ_API_KEY, JWT_SECRET
+uvicorn app.main:app --reload --port 8000
 ```
 
-4. **Set up environment variables**
+Interactive API docs at <http://localhost:8000/docs>.
 
-Copy `.env.example` to `.env`:
+### Frontend
+
+In a second terminal:
+
 ```bash
-cp .env.example .env
+cd frontend
+npm install
+cp .env.example .env.local
+npm run dev
 ```
 
-Edit `.env` and add your credentials:
-```env
-OPENAI_API_KEY=your_actual_openai_key_here
-MONGODB_URI=your_mongodb_connection_string_here
-```
+Open <http://localhost:3000>.
 
-5. **Run the application**
+### Tests
+
 ```bash
-streamlit run app.py
+cd backend && ./venv/bin/python -m pytest -q
 ```
 
-The app will open at `http://localhost:8501`
+78 tests, no database server or LLM required — the nutrition math, the agent's decision
+rules, plan validation, and the full HTTP path against an in-memory Mongo with a stubbed
+model.
 
 ---
 
-## 📖 How It Works
+## Repository layout
 
-### Agentic Decision Flow
-
-```python
-# Simplified pseudocode of agent reasoning
-
-if no_active_plan:
-    decision = "CREATE_NEW_PLAN"
-elif calories_consumed > target * 1.2:
-    decision = "REPLAN_HIGH_CALORIES"
-elif steps < 5000:
-    decision = "REPLAN_LOW_ACTIVITY"
-else:
-    decision = "MAINTAIN_CURRENT_PLAN"
 ```
-
-The agent uses **LangGraph** to manage this decision flow as a state machine, allowing for complex, multi-step reasoning.
-
-### Example Generated Plan
-
-```json
-{
-  "plan_title": "Week 1: Aggressive Fat Loss & Muscle Gain",
-  "duration_days": 7,
-  "agent_reasoning": "Based on current weight and activity levels...",
-  "daily_plans": [
-    {
-      "day": 1,
-      "meals": [
-        {
-          "meal_type": "Breakfast",
-          "recipe_suggestion": "Scrambled eggs with spinach",
-          "estimated_kcal": 350
-        }
-      ],
-      "activity": {
-        "activity_type": "Strength Training",
-        "duration_minutes": 45,
-        "description": "Upper body focus"
-      }
-    }
-  ]
-}
+backend/
+  app/
+    agent/        LangGraph workflow, prompts, output validation, LLM provider
+    api/routes/   auth · profile · plans · logs · agent
+    core/         config, security, logging
+    db/           Mongo lifecycle + repositories
+    models/       Pydantic domain models and enums
+    services/     nutrition math, adherence evaluation
+  tests/          78 tests
+frontend/
+  app/            landing · login · register · onboarding · dashboard
+  components/     agent runner, meal cards, UI primitives
+  lib/            typed API client, auth context, labels
+docs/             problem statement, migration guide
+legacy/streamlit/ the original prototype, still runnable
 ```
 
 ---
 
-## 📁 Project Structure
+## On performance
 
-```
-health-coach-agent/
-├── app.py                 # Streamlit UI
-├── run_agent.py          # LangGraph workflow implementation
-├── agent.py              # Agent configuration & prompts
-├── tools.py              # Database & utility functions
-├── models.py             # Pydantic data models
-├── requirements.txt      # Python dependencies
-├── .env.example          # Environment variables template
-└── .gitignore           # Git ignore rules
-```
+The Streamlit version cold-started for 30–60 seconds and sometimes timed out entirely.
+Three things changed:
 
----
+1. **The database connects at startup**, not lazily inside the first request. The TLS
+   handshake and auth round-trip happen while the container boots, and `minPoolSize` keeps
+   connections warm rather than reopening them per request.
+2. **The agent streams.** You watch it sense, evaluate, decide, draft and validate rather
+   than staring at a spinner.
+3. **Recipes are lazy.** A week of full recipes is ~8k output tokens most people never
+   read; they're generated per meal, on demand, and cached.
 
-## 🎨 Features Showcase
-
-### Current Features ✅
-- ✅ Autonomous plan generation
-- ✅ Progress evaluation logic
-- ✅ MongoDB persistence
-- ✅ Interactive Streamlit UI
-- ✅ Structured LLM outputs
-- ✅ Error handling & logging
-
-### Coming Soon 🚧
-- 📊 Progress tracking dashboard with charts
-- 🔗 Real wearable API integration (Fitbit, Google Fit)
-- 🗣️ Voice interface with speech recognition
-- 👥 Multi-user support with authentication
-- 📧 Email/SMS notifications
-- 📱 Mobile app (React Native)
+There's also a `/health` endpoint suitable for an uptime pinger, which stops a free-tier
+host from spinning the container down between visitors.
 
 ---
 
-## 🧪 Technical Challenges & Solutions
+## Roadmap
 
-### Challenge 1: Inconsistent LLM Outputs
-**Problem**: Free-form LLM responses were unreliable for structured data
-
-**Solution**: Implemented structured output with Pydantic validation
-```python
-agent_chain = LLM.with_structured_output(schema=HealthPlan)
-```
-
-### Challenge 2: State Management in Agent Loop
-**Problem**: Tracking agent decisions across multiple steps
-
-**Solution**: Used LangGraph's StateGraph for explicit state management
-```python
-workflow = StateGraph(AgentState)
-workflow.add_conditional_edges("evaluate", decision_function)
-```
-
-### Challenge 3: MongoDB BSON to JSON Conversion
-**Problem**: MongoDB's BSON types broke Streamlit rendering
-
-**Solution**: Clean conversion using bson.json_util
-```python
-clean_plan = json.loads(json_util.dumps(plan_document))
-```
+- [x] Multi-user auth and preference-aware planning
+- [x] Deterministic safety layer with validation retry
+- [x] Streamed agent runs and decision history
+- [x] Adaptive rebalancing on skipped meals
+- [ ] Nutrition-database grounding (USDA FoodData Central)
+- [ ] Google Fit / Fitbit OAuth for passive sensing
+- [ ] Weekly email digests
+- [ ] Multi-agent split: nutritionist + trainer + critic
 
 ---
 
-## 🔮 Future Enhancements
+## Screenshots
 
-- **Real-time Integration**: Connect with Fitbit/MyFitnessPal APIs
-- **RAG Implementation**: Add nutrition database for evidence-based suggestions
-- **Multi-tenancy**: Support multiple users with role-based access
-- **A/B Testing**: Test different agent reasoning strategies
-- **GDPR Compliance**: Data anonymization and export features
-- **Microservices**: Break into separate services for scalability
+| Dark mode | Mobile |
+|---|---|
+| ![Dark](docs/screenshots/dashboard-dark.png) | ![Mobile](docs/screenshots/mobile.png) |
 
 ---
 
-## 🤝 Contributing
+## About
 
-This is a portfolio project, but feedback and suggestions are welcome!
+Built by **Pranjal Sharma** ([@pranjalsharma-6](https://github.com/pranjalsharma-6)).
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/improvement`)
-3. Commit your changes (`git commit -m 'Add some improvement'`)
-4. Push to the branch (`git push origin feature/improvement`)
-5. Open a Pull Request
+This started as a Streamlit prototype demonstrating LangGraph. It was rebuilt as a
+full-stack system to address the parts that a prototype can't: multi-tenancy, safety,
+observability, and a plan that actually adapts to the person following it.
 
----
-
-## 📄 License
-
-MIT License - feel free to use this project as inspiration for your own work.
-
----
-
-## 👨‍💻 About
-
-Built to demonstrate practical applications of agentic AI systems. This project showcases:
-
-- **Autonomous reasoning** with state machines
-- **LLM integration** for natural language generation
-- **Production-ready architecture** with proper error handling
-- **Full-stack development** from database to UI
-- **System design** thinking for scalability
-
-### Key Learnings
-
-- Designing autonomous agent workflows
-- Managing LLM prompt engineering for consistency
-- Integrating multiple APIs (OpenAI, MongoDB)
-- Building responsive UIs with Streamlit
-- Handling state in complex AI systems
-
----
-
-## 📧 Contact
-
-**Pranjal Sharma**
-- GitHub: [@pranjalsharma-6](https://github.com/pranjalsharma-6)
-- LinkedIn: [Add your LinkedIn]
-- Email: [Add your email]
-
-**Project Link**: https://github.com/pranjalsharma-6/health-coach-agent
-
----
-
-## 🙏 Acknowledgments
-
-- LangChain team for the excellent framework
-- OpenAI for GPT-4 API access
-- MongoDB Atlas for free tier database hosting
-- Streamlit for rapid UI development
-
----
-
-⭐ **If you found this project interesting, please consider giving it a star!**
+MIT licensed.

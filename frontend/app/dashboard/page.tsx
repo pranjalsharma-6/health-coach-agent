@@ -35,6 +35,15 @@ import type {
   TargetsResponse,
 } from "@/lib/types";
 
+interface DashboardData {
+  profile: Profile;
+  targets: TargetsResponse;
+  plan: Plan | null;
+  log: DailyLog;
+  snapshot: AdherenceSnapshot;
+  events: AgentEvent[];
+}
+
 export default function DashboardPage() {
   const { loading: authLoading, user } = useRequireAuth();
   const { logout } = useAuth();
@@ -48,42 +57,59 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [agentPrompt, setAgentPrompt] = useState<string | null>(null);
-  const [selectedDay, setSelectedDay] = useState(0);
+  const [dayOverride, setDayOverride] = useState<number | null>(null);
 
-  const loadAll = useCallback(async () => {
+  /** Fetch everything the dashboard needs. Pure IO — touches no state. */
+  const fetchDashboard = useCallback(async (): Promise<DashboardData> => {
+    // One round trip's worth of latency instead of six.
+    const [profile, targets, plan, log, snapshot, events] = await Promise.all([
+      api.profile.get(),
+      api.profile.targets(),
+      api.plans.active(),
+      api.logs.today(),
+      api.logs.adherence(),
+      api.agent.events(),
+    ]);
+    return { profile, targets, plan, log, snapshot, events };
+  }, []);
+
+  const applyDashboard = useCallback((data: DashboardData) => {
+    setProfile(data.profile);
+    setTargets(data.targets);
+    setPlan(data.plan);
+    setLog(data.log);
+    setSnapshot(data.snapshot);
+    setEvents(data.events);
     setError(null);
-    try {
-      // One round trip's worth of latency instead of six.
-      const [profileData, targetsData, planData, logData, snapshotData, eventsData] =
-        await Promise.all([
-          api.profile.get(),
-          api.profile.targets(),
-          api.plans.active(),
-          api.logs.today(),
-          api.logs.adherence(),
-          api.agent.events(),
-        ]);
-
-      setProfile(profileData);
-      setTargets(targetsData);
-      setPlan(planData);
-      setLog(logData);
-      setSnapshot(snapshotData);
-      setEvents(eventsData);
-    } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : "Couldn't load your dashboard.",
-      );
-    } finally {
-      setLoading(false);
-    }
   }, []);
 
   useEffect(() => {
-    if (!authLoading && user) void loadAll();
-  }, [authLoading, user, loadAll]);
+    if (authLoading || !user) return;
+
+    // Guards against applying a response that lands after unmount, or after a
+    // newer load has already superseded this one.
+    let cancelled = false;
+
+    fetchDashboard()
+      .then((data) => {
+        if (!cancelled) applyDashboard(data);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : "Couldn't load your dashboard.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, user, fetchDashboard, applyDashboard]);
 
   /** Which day of the plan corresponds to today. */
   const todayIndex = useMemo(() => {
@@ -95,7 +121,14 @@ export default function DashboardPage() {
     return Math.max(0, elapsed) % plan.daily_plans.length;
   }, [plan]);
 
-  useEffect(() => setSelectedDay(todayIndex), [todayIndex]);
+  // The tab defaults to today and only diverges once the user picks another
+  // day. Deriving it from an optional override avoids syncing state in an
+  // effect, and the clamp keeps a stale pick valid if a shorter plan arrives.
+  const selectedDay = useMemo(() => {
+    if (dayOverride === null) return todayIndex;
+    const lastIndex = Math.max((plan?.daily_plans.length ?? 1) - 1, 0);
+    return Math.min(dayOverride, lastIndex);
+  }, [dayOverride, todayIndex, plan]);
 
   const statusByMeal = useMemo(() => {
     const map = new Map<string, MealStatus>();
@@ -121,8 +154,17 @@ export default function DashboardPage() {
 
   const handleAgentComplete = useCallback(async () => {
     setAgentPrompt(null);
-    await loadAll();
-  }, [loadAll]);
+    // A new plan should land the user back on today rather than whichever tab
+    // they were browsing. Reset in the handler, not an effect.
+    setDayOverride(null);
+    try {
+      applyDashboard(await fetchDashboard());
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "Couldn't refresh your plan.",
+      );
+    }
+  }, [fetchDashboard, applyDashboard]);
 
   if (authLoading || loading) return <DashboardSkeleton />;
 
@@ -252,7 +294,7 @@ export default function DashboardPage() {
                   {plan.daily_plans.map((d, i) => (
                     <button
                       key={d.day}
-                      onClick={() => setSelectedDay(i)}
+                      onClick={() => setDayOverride(i)}
                       className={cn(
                         "px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors",
                         i === selectedDay
