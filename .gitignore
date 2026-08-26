@@ -1,46 +1,46 @@
-# Environment variables
+# --- Secrets: never commit these ---
 .env
+.env.local
+.env.*.local
+*.pem
+.streamlit/secrets.toml
 
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-coach-env/
 venv/
 env/
+coach-env/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+htmlcov/
+.coverage
 
-# IDE
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+build/
+dist/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- IDE ---
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
+# --- OS ---
 .DS_Store
 Thumbs.db
-
-# Streamlit
-.streamlit/secrets.toml
-```
-
-5. **Save the file**
-6. **Go back to Git GUI**
-7. Click **"Rescan"** button (or press F5)
-8. Now `.gitignore` should appear in unstaged files
-9. Click **"Stage Changed"** again
-
----
-
-### **Step 5: Make Your First Commit**
-
-1. In Git GUI, find the **"Commit Message"** box at the bottom
-2. Type this message:
-```
-Initial commit: Autonomous Health Coach Agent
-
-- Implement agentic AI workflow with LangGraph
-- Add MongoDB persistence layer
-- Create Streamlit UI
-- Add logging and error handling

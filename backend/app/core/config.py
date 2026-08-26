@@ -1,0 +1,62 @@
+"""Application configuration, loaded from environment variables."""
+
+from functools import lru_cache
+from typing import List
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # --- App ---
+    app_name: str = "Kaya API"
+    environment: str = Field(default="development")
+    debug: bool = Field(default=True)
+
+    # --- Database ---
+    mongodb_uri: str = Field(default="")
+    mongodb_db_name: str = Field(default="KayaDB")
+
+    # --- Auth ---
+    # Override in production. Generate one with:  openssl rand -hex 32
+    jwt_secret: str = Field(default="dev-only-insecure-secret-change-me")
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
+
+    # --- LLM providers ---
+    groq_api_key: str = Field(default="")
+    openai_api_key: str = Field(default="")
+    llm_model: str = Field(default="llama-3.3-70b-versatile")
+    llm_temperature: float = Field(default=0.4)
+
+    # --- CORS ---
+    cors_origins: List[str] = Field(
+        default=["http://localhost:3000", "http://127.0.0.1:3000"]
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, v):
+        """Allow CORS_ORIGINS to be a comma-separated string in the environment."""
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() in {"production", "prod"}
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Cached settings instance — read the environment exactly once."""
+    return Settings()
+
+
+settings = get_settings()
