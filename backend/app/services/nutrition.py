@@ -9,7 +9,7 @@ The LLM is allowed to choose *what food*, never *how many calories*.
 from dataclasses import dataclass
 
 from app.core.logging import get_logger
-from app.models.enums import Gender, Goal
+from app.models.enums import ActivityLevel, Gender, Goal
 from app.models.plan import NutritionTargets
 from app.models.profile import ProfileBase
 
@@ -70,8 +70,13 @@ def calculate_bmr(
 
 
 def calculate_tdee(bmr: float, profile: ProfileBase) -> float:
-    """Total daily energy expenditure = BMR x activity multiplier."""
-    return bmr * profile.activity_level.multiplier
+    """Total daily energy expenditure = BMR x activity multiplier.
+
+    `activity_level` arrives as a plain string on models loaded from Mongo
+    (`use_enum_values=True`) and as an enum on freshly-validated input, so
+    coerce before reaching for enum members.
+    """
+    return bmr * ActivityLevel(profile.activity_level).multiplier
 
 
 def calculate_targets(profile: ProfileBase) -> NutritionTargets:
@@ -85,7 +90,7 @@ def calculate_targets(profile: ProfileBase) -> NutritionTargets:
     weight = profile.current_weight_kg
 
     # Protein: goal-driven, floored so it can never collapse.
-    protein_g = round(weight * PROTEIN_G_PER_KG[profile.goal])
+    protein_g = round(weight * PROTEIN_G_PER_KG[Goal(profile.goal)])
     protein_kcal = protein_g * KCAL_PER_G_PROTEIN
 
     # Fat: at least the essential minimum, otherwise ~25% of intake.

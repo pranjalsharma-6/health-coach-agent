@@ -1,0 +1,206 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Kaya design tokens
+
+   Warm and earthy rather than clinical. Health dashboards default to cold
+   blues and greys; food is warm, so the surfaces lean cream and the accents
+   come from a kitchen — forest green, terracotta, turmeric.
+--------------------------------------------------------------------------- */
+
+@theme {
+  /* Brand — deep forest green */
+  --color-brand-50: #f0f7f2;
+  --color-brand-100: #dceee2;
+  --color-brand-200: #bcddc8;
+  --color-brand-300: #8ec3a4;
+  --color-brand-400: #5aa279;
+  --color-brand-500: #38855c;
+  --color-brand-600: #276b48;
+  --color-brand-700: #1f553a;
+  --color-brand-800: #1b4430;
+  --color-brand-900: #173829;
+  --color-brand-950: #0b1f17;
+
+  /* Accent — terracotta, for actions that need warmth */
+  --color-clay-50: #fdf5f2;
+  --color-clay-100: #fbeae2;
+  --color-clay-200: #f7d3c3;
+  --color-clay-300: #f0b39b;
+  --color-clay-400: #e58a67;
+  --color-clay-500: #d96a44;
+  --color-clay-600: #c65130;
+  --color-clay-700: #a53f28;
+  --color-clay-800: #863626;
+  --color-clay-900: #6e3022;
+
+  /* Turmeric — highlights, streaks, protein */
+  --color-spice-100: #fdf0d5;
+  --color-spice-200: #f9dfa6;
+  --color-spice-300: #f2c66c;
+  --color-spice-400: #e9ab3c;
+  --color-spice-500: #d9911f;
+  --color-spice-600: #b97317;
+
+  /* Neutrals — warm-tinted, not pure grey */
+  --color-sand-50: #faf9f6;
+  --color-sand-100: #f4f2ec;
+  --color-sand-200: #e8e4d9;
+  --color-sand-300: #d5cfbf;
+  --color-sand-400: #b0a894;
+  --color-sand-500: #8a8272;
+  --color-sand-600: #6b6456;
+  --color-sand-700: #524d43;
+  --color-sand-800: #3a3630;
+  --color-sand-900: #262320;
+  --color-sand-950: #171513;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-fraunces), Georgia, serif;
+
+  --radius-card: 1rem;
+}
+
+/* --------------------------------------------------------------------------
+   Semantic surface tokens, themed.
+   Defined on bare :root so the light palette is always the baseline.
+-------------------------------------------------------------------------- */
+
+:root {
+  --surface-page: var(--color-sand-50);
+  --surface-card: #ffffff;
+  --surface-raised: var(--color-sand-100);
+  --surface-border: var(--color-sand-200);
+  --text-primary: var(--color-sand-900);
+  --text-secondary: var(--color-sand-600);
+  --text-muted: var(--color-sand-500);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface-page: #14120f;
+    --surface-card: #1c1a16;
+    --surface-raised: #24211c;
+    --surface-border: #322e27;
+    --text-primary: var(--color-sand-100);
+    --text-secondary: var(--color-sand-400);
+    --text-muted: var(--color-sand-500);
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface-page: #14120f;
+  --surface-card: #1c1a16;
+  --surface-raised: #24211c;
+  --surface-border: #322e27;
+  --text-primary: var(--color-sand-100);
+  --text-secondary: var(--color-sand-400);
+  --text-muted: var(--color-sand-500);
+}
+
+@theme inline {
+  --color-page: var(--surface-page);
+  --color-card: var(--surface-card);
+  --color-raised: var(--surface-raised);
+  --color-line: var(--surface-border);
+  --color-ink: var(--text-primary);
+  --color-ink-soft: var(--text-secondary);
+  --color-ink-muted: var(--text-muted);
+}
+
+* {
+  border-color: var(--surface-border);
+}
+
+body {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --------------------------------------------------------------------------
+   Motion
+-------------------------------------------------------------------------- */
+
+@keyframes kaya-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes kaya-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-brand-500) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes kaya-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.animate-fade-up {
+  animation: kaya-fade-up 0.4s ease-out both;
+}
+
+.animate-pulse-ring {
+  animation: kaya-pulse-ring 1.8s ease-out infinite;
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-raised) 25%,
+    color-mix(in srgb, var(--surface-raised) 60%, var(--surface-card)) 50%,
+    var(--surface-raised) 75%
+  );
+  background-size: 200% 100%;
+  animation: kaya-sweep 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-pulse-ring,
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Scrollbars — subtle, themed
+-------------------------------------------------------------------------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-border);
+  border-radius: 999px;
+  border: 3px solid var(--surface-page);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-sand-400);
+}

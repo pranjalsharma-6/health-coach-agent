@@ -53,8 +53,10 @@ def make_targets(calories: int = 2000, protein: int = 170) -> NutritionTargets:
 def make_meal(
     meal_id: str,
     meal_type: MealType = MealType.BREAKFAST,
-    name: str = "Masala oats with peanuts",
-    description: str = "Savoury oats with vegetables and roasted peanuts.",
+    # Deliberately free of any keyword the diet or allergen scans look for,
+    # so a clean fixture stays clean.
+    name: str = "Masala oats with mixed vegetables",
+    description: str = "Savoury oats simmered with seasonal vegetables.",
     calories: int = 500,
     protein: int = 42,
 ) -> MealItem:
