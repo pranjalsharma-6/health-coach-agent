@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, profile
+from app.api.routes import agent, auth, logs, plans, profile
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
 from app.db import mongo
@@ -52,6 +52,9 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(profile.router, prefix="/api/v1")
+app.include_router(plans.router, prefix="/api/v1")
+app.include_router(logs.router, prefix="/api/v1")
+app.include_router(agent.router, prefix="/api/v1")
 
 
 @app.get("/", tags=["meta"])

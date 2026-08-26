@@ -96,6 +96,13 @@ class AdherenceSnapshot(BaseModel):
     adherence_rate_7d: float = Field(
         default=1.0, description="Fraction of planned meals eaten over the last week."
     )
+    meals_logged_7d: int = Field(
+        default=0,
+        description=(
+            "How many meals the rate is computed from. Callers must check this "
+            "before acting on the rate — 1 skip out of 2 is not a 50% habit."
+        ),
+    )
 
     @property
     def is_on_track(self) -> bool:

@@ -63,6 +63,8 @@ def build_snapshot(
     total_planned = len(planned_meals)
     pending = max(total_planned - eaten - skipped, 0)
 
+    adherence_rate, meals_logged = _adherence_rate(recent_logs)
+
     return AdherenceSnapshot(
         date=target_date,
         meals_planned=total_planned,
@@ -79,7 +81,8 @@ def build_snapshot(
         sleep_hours=today_log.sleep_hours if today_log else None,
         skip_streak_days=_skip_streak(recent_logs, target_date),
         skips_last_7_days=_count_skips(recent_logs),
-        adherence_rate_7d=_adherence_rate(recent_logs),
+        adherence_rate_7d=adherence_rate,
+        meals_logged_7d=meals_logged,
     )
 
 
@@ -124,12 +127,16 @@ def _count_skips(logs: List[DailyLogInDB]) -> int:
     )
 
 
-def _adherence_rate(logs: List[DailyLogInDB]) -> float:
-    """Fraction of logged meals that were eaten rather than skipped.
+def _adherence_rate(logs: List[DailyLogInDB]) -> tuple[float, int]:
+    """Fraction of logged meals that were eaten, and the sample size behind it.
 
     Only counts meals the user actually logged. A day they never opened the app
     is missing data, not a failure — treating silence as non-adherence would
     make the agent panic every time someone goes on holiday.
+
+    The sample size is returned alongside the rate because the rate alone is
+    misleading at low n: one skip out of two logged meals reads as 50%
+    adherence, which is not evidence of a habit.
     """
     total = 0
     eaten = 0
@@ -143,8 +150,8 @@ def _adherence_rate(logs: List[DailyLogInDB]) -> float:
                 eaten += 1
 
     if total == 0:
-        return 1.0  # no evidence of a problem
-    return round(eaten / total, 3)
+        return 1.0, 0  # no evidence of a problem
+    return round(eaten / total, 3), total
 
 
 def describe_snapshot(snapshot: AdherenceSnapshot) -> str:
