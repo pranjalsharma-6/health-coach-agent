@@ -50,7 +50,7 @@ const DEFAULT_DRAFT: ProfileDraft = {
   activity_level: "moderately_active",
   target_timeline_weeks: 12,
   diet_type: "vegetarian",
-  cuisine_preference: "north_indian",
+  cuisine_preferences: ["north_indian"],
   allergies: [],
   disliked_foods: [],
   meals_per_day: 4,
@@ -73,6 +73,39 @@ export default function OnboardingPage() {
 
   function update<K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) {
     setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  /** Add or remove one cuisine, keeping at least one selected.
+
+   * Deselecting the last one would leave the planner with no cuisine guidance
+   * at all, so it falls back to "Mixed" — which is what an empty selection
+   * means anyway. Choosing anything else then clears Mixed, since "mixed plus
+   * South Indian" is not a coherent instruction.
+   */
+  function toggleCuisine(cuisine: Cuisine) {
+    setDraft((prev) => {
+      const selected = prev.cuisine_preferences;
+
+      if (selected.includes(cuisine)) {
+        const remaining = selected.filter((c) => c !== cuisine);
+        return {
+          ...prev,
+          cuisine_preferences: remaining.length ? remaining : ["mixed"],
+        };
+      }
+
+      if (cuisine === "mixed") {
+        return { ...prev, cuisine_preferences: ["mixed"] };
+      }
+
+      return {
+        ...prev,
+        cuisine_preferences: [
+          ...selected.filter((c) => c !== "mixed"),
+          cuisine,
+        ],
+      };
+    });
   }
 
   // Target weight is only meaningful for weight-change goals.
@@ -301,13 +334,16 @@ export default function OnboardingPage() {
                   </div>
                 </Field>
 
-                <Field label="Food you actually cook and enjoy">
+                <Field
+                  label="Food you actually cook and enjoy"
+                  hint="Pick as many as you like — Kaya draws from all of them across the week."
+                >
                   <div className="grid sm:grid-cols-3 gap-2">
                     {(Object.keys(CUISINE_LABELS) as Cuisine[]).map((c) => (
                       <ChoiceCard
                         key={c}
-                        selected={draft.cuisine_preference === c}
-                        onSelect={() => update("cuisine_preference", c)}
+                        selected={draft.cuisine_preferences.includes(c)}
+                        onSelect={() => toggleCuisine(c)}
                         title={CUISINE_LABELS[c]}
                       />
                     ))}
@@ -458,7 +494,9 @@ export default function OnboardingPage() {
                 />
                 <ReviewRow
                   label="Diet"
-                  value={`${DIET_EMOJI[draft.diet_type]} ${DIET_LABELS[draft.diet_type]} · ${CUISINE_LABELS[draft.cuisine_preference]}`}
+                  value={`${DIET_EMOJI[draft.diet_type]} ${DIET_LABELS[draft.diet_type]} · ${draft.cuisine_preferences
+                    .map((c) => CUISINE_LABELS[c])
+                    .join(", ")}`}
                 />
                 {draft.allergies.length > 0 && (
                   <ReviewRow

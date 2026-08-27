@@ -113,10 +113,33 @@ _GOAL_FRAMING: dict[Goal, str] = {
 }
 
 
+def _describe_cuisines(preferences) -> str:
+    """Render one or more cuisine choices as a single instruction.
+
+    Selecting several means "draw from all of these across the week", not
+    "fuse them into one dish" — a model handed a bare list will cheerfully
+    invent a miso rajma, so the multi-cuisine phrasing says so explicitly.
+
+    Values arrive as plain strings from Mongo (`use_enum_values=True`) and as
+    enum members from freshly validated input, so coerce before indexing.
+    """
+    cuisines = [Cuisine(c) for c in (preferences or [])] or [Cuisine.MIXED]
+
+    if len(cuisines) == 1:
+        return _CUISINE_GUIDANCE[cuisines[0]]
+
+    names = ", ".join(c.value.replace("_", " ") for c in cuisines)
+    details = " ".join(_CUISINE_GUIDANCE[c] for c in cuisines)
+    return (
+        f"The user eats across several cuisines ({names}). Draw from all of "
+        f"them over the week — whole dishes from one tradition at a time, "
+        f"never blended into a single dish. {details}"
+    )
+
+
 def build_constraints_block(profile: ProfileInDB) -> str:
     """Render the user's hard constraints as an unmissable prompt section."""
     diet = DietType(profile.diet_type)
-    cuisine = Cuisine(profile.cuisine_preference)
     goal = Goal(profile.goal)
 
     lines = [
@@ -124,7 +147,7 @@ def build_constraints_block(profile: ProfileInDB) -> str:
         "",
         f"**Diet type — {diet.label}:** {_DIET_RULES[diet]}",
         "",
-        f"**Cuisine:** {_CUISINE_GUIDANCE[cuisine]}",
+        f"**Cuisine:** {_describe_cuisines(profile.cuisine_preferences)}",
         "",
         f"**Goal framing:** {_GOAL_FRAMING[goal]}",
         "",

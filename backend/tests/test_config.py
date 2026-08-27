@@ -106,3 +106,68 @@ def test_the_shipped_env_example_actually_loads(tmp_path, monkeypatch):
 
     assert settings.cors_origins == LOCAL_DEFAULT
     assert settings.mongodb_db_name == "KayaDB"
+
+
+class TestCuisinePreferences:
+    """Cuisine went from one enum to a list.
+
+    People eat across cuisines — North Indian on weekdays, continental at the
+    weekend — and forcing one choice made the plan less like their actual food,
+    which is the whole adherence lever. Profiles written before the change hold
+    a bare string under the old key, and must keep working.
+    """
+
+    @staticmethod
+    def _profile(**extra):
+        from app.models.profile import ProfileInDB
+
+        return ProfileInDB.model_validate(
+            {
+                "user_id": "u",
+                "full_name": "P",
+                "age_years": 22,
+                "gender": "male",
+                "goal": "muscle_gain",
+                "diet_type": "vegetarian",
+                "height_cm": 175,
+                "current_weight_kg": 70,
+                **extra,
+            }
+        )
+
+    def test_reads_a_profile_written_before_the_change(self):
+        """The old key, holding a bare string. Without the alias this silently
+        resets to "mixed" and the user loses a choice they made."""
+        assert self._profile(cuisine_preference="south_indian").cuisine_preferences == [
+            "south_indian"
+        ]
+
+    def test_accepts_several(self):
+        assert self._profile(
+            cuisine_preferences=["north_indian", "mediterranean"]
+        ).cuisine_preferences == ["north_indian", "mediterranean"]
+
+    def test_an_empty_selection_means_mixed(self):
+        """Not an error — "no strong preference" is a real answer, and it is
+        what MIXED encodes. Leaving it empty would strip cuisine guidance from
+        the prompt entirely."""
+        assert self._profile(cuisine_preferences=[]).cuisine_preferences == ["mixed"]
+
+    def test_the_prompt_tells_the_model_not_to_fuse_them(self):
+        """A bare list invites a miso rajma."""
+        from app.agent.prompts import build_constraints_block
+
+        block = build_constraints_block(
+            self._profile(cuisine_preferences=["north_indian", "east_asian"])
+        )
+        assert "never blended into a single dish" in block
+        assert "north indian" in block.lower()
+        assert "east asian" in block.lower()
+
+    def test_a_single_choice_reads_naturally(self):
+        """One cuisine shouldn't get the multi-cuisine preamble."""
+        from app.agent.prompts import build_constraints_block
+
+        block = build_constraints_block(self._profile(cuisine_preferences=["south_indian"]))
+        assert "several cuisines" not in block
+        assert "idli" in block

@@ -64,7 +64,7 @@ PROFILE_PAYLOAD = {
     "activity_level": "lightly_active",
     "target_timeline_weeks": 16,
     "diet_type": "eggetarian",
-    "cuisine_preference": "south_indian",
+    "cuisine_preferences": ["south_indian"],
     "allergies": ["Peanut", "peanut", " "],
     "disliked_foods": ["bitter gourd"],
     "meals_per_day": 4,
@@ -200,7 +200,7 @@ class TestProfileAndTargets:
         body = response.json()
         assert body["diet_type"] == "vegan"
         assert body["current_weight_kg"] == 70.5
-        assert body["cuisine_preference"] == "south_indian"  # untouched
+        assert body["cuisine_preferences"] == ["south_indian"]  # untouched
 
     async def test_invalid_profile_values_are_rejected(self, client):
         token = await register(client)

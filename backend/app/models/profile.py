@@ -5,9 +5,15 @@ If a field can't change the output, it shouldn't be in the onboarding flow.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Annotated, Any, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    BeforeValidator,
+    Field,
+    field_validator,
+)
 
 from app.models.common import MongoModel, utcnow
 from app.models.enums import (
@@ -19,6 +25,31 @@ from app.models.enums import (
     Gender,
     Goal,
 )
+
+
+def _coerce_cuisines(value: Any) -> Any:
+    """Accept the old single value as well as a list.
+
+    This was one enum until the obvious objection landed: someone who eats
+    North Indian on weekdays and continental at the weekend is not an edge
+    case. Profiles already in Mongo hold a bare string, and rejecting them
+    would lock those users out of their own plan, so the old shape is read as
+    a one-item list rather than migrated.
+
+    An empty selection means "no strong preference", which is what MIXED
+    already encodes — mapping it there beats leaving the planner with no
+    cuisine guidance at all.
+    """
+    if value is None:
+        return value
+    if isinstance(value, (str, Cuisine)):
+        return [value]
+    if isinstance(value, list) and not value:
+        return [Cuisine.MIXED]
+    return value
+
+
+CuisineList = Annotated[List[Cuisine], BeforeValidator(_coerce_cuisines)]
 
 
 class ProfileBase(BaseModel):
@@ -36,7 +67,13 @@ class ProfileBase(BaseModel):
 
     # --- Diet (the adherence levers) ---
     diet_type: DietType
-    cuisine_preference: Cuisine = Cuisine.MIXED
+    # The alias reads profiles written before this was a list. Without it a
+    # stored `cuisine_preference` is simply an unknown key, and the user's
+    # choice silently resets to "mixed" the next time they load their profile.
+    cuisine_preferences: CuisineList = Field(
+        default_factory=lambda: [Cuisine.MIXED],
+        validation_alias=AliasChoices("cuisine_preferences", "cuisine_preference"),
+    )
     allergies: List[str] = Field(default_factory=list)
     disliked_foods: List[str] = Field(default_factory=list)
 
@@ -84,7 +121,12 @@ class ProfileUpdate(BaseModel):
     activity_level: Optional[ActivityLevel] = None
     target_timeline_weeks: Optional[int] = Field(default=None, ge=4, le=52)
     diet_type: Optional[DietType] = None
-    cuisine_preference: Optional[Cuisine] = None
+    cuisine_preferences: Optional[CuisineList] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "cuisine_preferences", "cuisine_preference"
+        ),
+    )
     allergies: Optional[List[str]] = None
     disliked_foods: Optional[List[str]] = None
     meals_per_day: Optional[int] = Field(default=None, ge=2, le=6)

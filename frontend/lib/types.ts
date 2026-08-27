@@ -76,7 +76,7 @@ export interface Profile {
   activity_level: ActivityLevel;
   target_timeline_weeks: number;
   diet_type: DietType;
-  cuisine_preference: Cuisine;
+  cuisine_preferences: Cuisine[];
   allergies: string[];
   disliked_foods: string[];
   meals_per_day: number;
