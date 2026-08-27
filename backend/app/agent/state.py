@@ -17,6 +17,23 @@ from app.models.plan import (
 from app.models.profile import ProfileInDB
 
 
+def keep_first_error(current: Optional[str], incoming: Optional[str]) -> Optional[str]:
+    """Reducer for the `error` channel: the first failure reported wins.
+
+    `plan_meals` and `plan_training` run in the same superstep, so a condition
+    that breaks both — no API key, a retired model — makes both write here at
+    once. A plain LastValue channel rejects that with LangGraph's
+    `InvalidUpdateError`, which replaces the real diagnosis with a framework
+    error about concurrent writes.
+
+    First-wins rather than last-wins because the two messages describe the same
+    root cause, and the nutritionist's is the one the user cares about.
+    Nothing in the graph ever clears this channel, so there is no case where
+    holding the earlier value suppresses a recovery.
+    """
+    return current or incoming
+
+
 class AgentState(TypedDict, total=False):
     """State passed between nodes.
 
@@ -74,7 +91,7 @@ class AgentState(TypedDict, total=False):
     # Concatenated rather than overwritten, so both concurrent specialists can
     # record their progress without one clobbering the other.
     steps: Annotated[List[Dict[str, Any]], operator.add]
-    error: Optional[str]
+    error: Annotated[Optional[str], keep_first_error]
 
 
 def new_state(user_id: str, today: date, force_replan: bool = False) -> AgentState:

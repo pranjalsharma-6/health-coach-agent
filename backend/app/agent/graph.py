@@ -47,7 +47,12 @@ from typing import Any, Dict, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
-from app.agent.llm import LLMUnavailableError, get_llm, get_structured_llm
+from app.agent.llm import (
+    LLMUnavailableError,
+    describe_llm_failure,
+    get_llm,
+    get_structured_llm,
+)
 from app.agent.prompts import (
     CRITIC_SYSTEM_PROMPT,
     NUTRITIONIST_SYSTEM_PROMPT,
@@ -340,6 +345,18 @@ async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
 
     except Exception as exc:
         logger.exception("Meal planning failed on attempt %s", attempt)
+        failure = describe_llm_failure(exc)
+
+        if not failure.retryable:
+            # A bad model name or a rejected key fails identically every time.
+            # Setting `error` routes straight to `record`, so the user gets the
+            # reason now instead of after three attempts at the same wall.
+            return {
+                "error": failure.message,
+                "meal_draft": None,
+                "steps": [step("plan_meals", "error", failure.message)],
+            }
+
         return {
             "meal_draft": None,
             "retry_feedback": (
@@ -347,11 +364,7 @@ async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
                 "schema. Return valid structured output matching it exactly."
             ),
             "steps": [
-                step(
-                    "plan_meals",
-                    "error",
-                    f"Meal drafting failed: {type(exc).__name__}",
-                )
+                step("plan_meals", "error", f"Meal drafting failed. {failure.message}")
             ],
         }
 
@@ -411,13 +424,22 @@ async def plan_training_node(state: AgentState) -> Dict[str, Any]:
 
     except Exception as exc:
         logger.exception("Training planning failed")
+        failure = describe_llm_failure(exc)
+
+        if not failure.retryable:
+            return {
+                "error": failure.message,
+                "training_draft": None,
+                "steps": [step("plan_training", "error", failure.message)],
+            }
+
         return {
             "training_draft": None,
             "steps": [
                 step(
                     "plan_training",
                     "error",
-                    f"Training drafting failed: {type(exc).__name__}",
+                    f"Training drafting failed. {failure.message}",
                 )
             ],
         }
