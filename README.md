@@ -90,6 +90,13 @@ under the 4/4/9 rule and is still impossible; only the ceiling catches it. The s
 grounds the planner's prompt, so the model builds meals from foods that exist with numbers
 that are approximately right, instead of asserting a figure it likes.
 
+Recipes go one better: every ingredient carries a weight in grams, so a meal's macros are
+**computed** rather than bounded. The sum is checked against what the plan claimed, the
+model gets one correction round if the portions don't reach it, and the result is shown to
+the user either way — a number you can check beats a number you have to trust. Where too
+few ingredients are recognised to judge fairly, it says so instead of blaming the recipe
+for gaps in the table.
+
 Why a curated table and not USDA FoodData Central: USDA has effectively no coverage of the
 food Kaya plans — no rajma chawal, no poha, no chapati as anyone in India makes one. A
 nutrition database that doesn't know the cuisine is worse than none, because it returns
@@ -162,7 +169,7 @@ Open <http://localhost:3000>.
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-python -m pytest -q          # 261 tests
+python -m pytest -q          # 287 tests
 python -m evals.run          # agent evaluation report
 ```
 
@@ -198,7 +205,7 @@ backend/
     models/       Pydantic domain models and enums
     services/     nutrition math, adherence evaluation, ingredient table
   evals/          agent evaluation suite (decisions + validator detection)
-  tests/          261 tests — examples, properties, API integration, evals
+  tests/          287 tests — examples, properties, API integration, evals
 frontend/
   app/            landing · login · register · onboarding · dashboard
   components/     agent runner, meal cards, UI primitives
@@ -239,8 +246,7 @@ Render + Vercel + Atlas setup.
 - [x] CI on push; Docker, Render blueprint and deployment guide
 - [x] Property-based safety proofs and an agent evaluation suite
 - [x] Curated ingredient table grounding the protein ceiling and the planner prompt
-- [ ] Per-ingredient quantities in recipes, so a meal's macros can be computed
-      from its ingredient list rather than only bounded
+- [x] Per-ingredient gram quantities, so recipe macros are computed and verified
 - [ ] Google Fit / Fitbit OAuth for passive sensing
 - [ ] Weekly email digests
 - [ ] Multi-agent split: nutritionist + trainer + critic

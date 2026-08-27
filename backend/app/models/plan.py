@@ -8,21 +8,107 @@ Design note on recipes:
     maybe three recipes a week — generating 28 up front is waste.
 """
 
+import re
 from datetime import datetime
-from typing import List, Optional
+from typing import Annotated, Any, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 from app.models.common import MongoModel, utcnow
 from app.models.enums import AgentDecision, MealStatus, MealType
+
+# A legacy free-text ingredient line: "150g paneer, crumbled".
+#
+# The mass unit is REQUIRED for the number to count as grams. "1 capsicum" is a
+# count, not one gram, and reading it as a gram would put a badly wrong figure
+# into a feature whose entire point is not making numbers up. Without a unit the
+# weight stays unknown and the analyser skips the line.
+_LEGACY_INGREDIENT = re.compile(
+    r"^\s*(?P<qty>[\d.]+)\s*(?P<unit>kg|g|ml|l)\b\s*(?P<rest>.+)$", re.IGNORECASE
+)
+
+# A leading amount with a non-mass unit: "1 tsp cumin seeds", "2 cups rice".
+_COUNTED_INGREDIENT = re.compile(
+    r"^\s*[\d./]+\s*"
+    r"(?:tsp|teaspoons?|tbsp|tablespoons?|cups?|pinch(?:es)?|"
+    r"cloves?|slices?|pieces?|nos?\.?|numbers?)?\s*"
+    r"(?P<rest>.+)$",
+    re.IGNORECASE,
+)
+
+_UNIT_TO_GRAMS = {"kg": 1000.0, "l": 1000.0, "g": 1.0, "ml": 1.0}
+
+
+def _split_item(rest: str) -> tuple[str, Optional[str]]:
+    item, _, preparation = rest.partition(",")
+    return item.strip(), (preparation.strip() or None)
+
+
+def _coerce_ingredient(value: Any) -> Any:
+    """Accept a plain string where a structured ingredient is expected.
+
+    Recipes generated before quantities were structured are stored as strings
+    like "150g paneer, crumbled". Parsing them on read means old plans keep
+    rendering instead of failing validation, and their macros become computable
+    wherever the line actually carried a weight.
+    """
+    if not isinstance(value, str):
+        return value
+
+    weighed = _LEGACY_INGREDIENT.match(value)
+    if weighed:
+        item, preparation = _split_item(weighed.group("rest"))
+        try:
+            grams = float(weighed.group("qty")) * _UNIT_TO_GRAMS[
+                weighed.group("unit").lower()
+            ]
+        except (ValueError, KeyError):
+            grams = None
+        return {"item": item, "quantity_g": grams, "preparation": preparation}
+
+    counted = _COUNTED_INGREDIENT.match(value)
+    rest = counted.group("rest") if counted else value
+    item, preparation = _split_item(rest)
+
+    return {"item": item or value.strip(), "quantity_g": None, "preparation": preparation}
+
+
+class RecipeIngredient(BaseModel):
+    """One ingredient with an explicit weight.
+
+    Structured rather than free text so a meal's macros can be *computed* from
+    what's actually in it, instead of only bounded by what's physically
+    possible. `quantity_g` may be None for things that resist weighing —
+    "a pinch of hing", "2 green chillies" — which the analyser then skips.
+    """
+
+    item: str = Field(
+        description="The food itself, with no quantity or preparation, e.g. 'paneer'."
+    )
+    quantity_g: Optional[float] = Field(
+        default=None,
+        description=(
+            "Weight in grams (use millilitres for liquids, 1ml = 1g). Null only "
+            "for seasonings too small or awkward to weigh."
+        ),
+    )
+    preparation: Optional[str] = Field(
+        default=None, description="How it's prepared, e.g. 'finely chopped'."
+    )
+
+    def render(self) -> str:
+        """Human-readable line, for the UI and for diet keyword scanning."""
+        amount = f"{self.quantity_g:g}g " if self.quantity_g else ""
+        suffix = f", {self.preparation}" if self.preparation else ""
+        return f"{amount}{self.item}{suffix}"
 
 
 class Recipe(BaseModel):
     """Full cooking detail for a meal. Generated on demand."""
 
-    ingredients: List[str] = Field(
-        description="Ingredients with quantities, e.g. '150g paneer, cubed'."
-    )
+    ingredients: List[
+        Annotated[RecipeIngredient, BeforeValidator(_coerce_ingredient)]
+    ] = Field(description="Every ingredient with its weight in grams.")
     steps: List[str] = Field(description="Numbered cooking steps, each one sentence.")
     prep_minutes: int = Field(description="Total hands-on time in minutes.")
     serves: int = Field(default=1, description="Number of portions this makes.")

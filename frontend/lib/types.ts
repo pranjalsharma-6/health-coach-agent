@@ -108,12 +108,30 @@ export interface TargetsResponse {
   bmi: number;
 }
 
+export interface RecipeIngredient {
+  item: string;
+  /** Null for seasonings too small to weigh — never guessed at. */
+  quantity_g: number | null;
+  preparation: string | null;
+}
+
 export interface Recipe {
-  ingredients: string[];
+  ingredients: RecipeIngredient[];
   steps: string[];
   prep_minutes: number;
   serves: number;
   tips: string | null;
+}
+
+/** What a recipe's weights actually add up to, versus what the plan claims. */
+export interface MacroCheck {
+  computed_kcal: number;
+  computed_protein_g: number;
+  claimed_kcal: number;
+  claimed_protein_g: number;
+  coverage: number;
+  reliable: boolean;
+  unmatched: string[];
 }
 
 export interface Meal {

@@ -390,8 +390,23 @@ Keep what was working; change what wasn't."""
 RECIPE_SYSTEM_PROMPT = """You are a practical home-cooking instructor.
 
 Write recipes for real kitchens: common ingredients, ordinary equipment, and
-steps a nervous beginner can follow. Give exact quantities in grams or standard
-household measures. Never assume specialist equipment."""
+steps a nervous beginner can follow. Never assume specialist equipment.
+
+## Quantities
+
+Every substantial ingredient MUST carry `quantity_g`, its weight in grams
+(use millilitres for liquids — treat 1 ml as 1 g). This is not a formatting
+preference: the weights are summed against a nutrition table to check the
+recipe actually delivers the macros it claims, so a missing weight means the
+check silently skips that ingredient.
+
+- `item` is the food alone — "paneer", not "150g paneer, crumbled".
+- Put preparation in `preparation` — "crumbled", "finely chopped".
+- Leave `quantity_g` null ONLY for seasonings genuinely too small to weigh:
+  a pinch of asafoetida, a couple of curry leaves. Never for a vegetable, a
+  grain, a protein source, or any fat you cook in.
+- Weigh things as they are eaten. If the recipe uses 60g of dry rice, say so
+  in the steps, but list the ingredient at its cooked weight."""
 
 
 def build_recipe_prompt(
@@ -422,5 +437,32 @@ Constraints:
 - Cook's skill level: {profile.cooking_skill}
 - Budget: {profile.budget_tier}
 
-Give ingredients with quantities, numbered steps of one sentence each, honest
-prep time, and one useful swap or make-ahead tip."""
+Give every ingredient a weight in grams, numbered steps of one sentence each,
+honest prep time, and one useful swap or make-ahead tip.
+
+The weights must actually add up to roughly the calories and protein above —
+they are checked against a nutrition table, not taken on trust."""
+
+
+def build_recipe_correction(
+    meal_name: str,
+    claimed_kcal: int,
+    claimed_protein_g: int,
+    computed_kcal: float,
+    computed_protein_g: float,
+) -> str:
+    """Ask for a corrected recipe when the weights don't add up.
+
+    Names both figures rather than saying "that was wrong": the model needs to
+    know which direction and by how much to fix the portions.
+    """
+    return f"""Your previous recipe for **{meal_name}** was REJECTED.
+
+Summing your ingredient weights against a nutrition table gives
+**{computed_kcal:.0f} kcal** and **{computed_protein_g:.0f}g protein**, but the
+meal is supposed to provide **{claimed_kcal} kcal** and **{claimed_protein_g}g
+protein**.
+
+Rewrite the recipe with portion sizes that genuinely reach those figures. If the
+protein is short, increase the protein-dense ingredient rather than scaling
+everything up — that would overshoot the calories. Keep every quantity in grams."""

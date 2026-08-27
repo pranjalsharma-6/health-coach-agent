@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Badge, Button, Spinner, cn } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import { MEAL_EMOJI, MEAL_LABELS } from "@/lib/labels";
-import type { Meal, MealStatus, Recipe } from "@/lib/types";
+import type { MacroCheck, Meal, MealStatus, Recipe } from "@/lib/types";
 
 interface Props {
   meal: Meal;
@@ -18,6 +18,7 @@ interface Props {
 export function MealCard({ meal, status, onLog, loggable }: Props) {
   const [logging, setLogging] = useState<MealStatus | null>(null);
   const [recipe, setRecipe] = useState<Recipe | null>(meal.recipe);
+  const [macroCheck, setMacroCheck] = useState<MacroCheck | null>(null);
   const [recipeOpen, setRecipeOpen] = useState(false);
   const [recipeLoading, setRecipeLoading] = useState(false);
   const [recipeError, setRecipeError] = useState<string | null>(null);
@@ -45,6 +46,7 @@ export function MealCard({ meal, status, onLog, loggable }: Props) {
     try {
       const result = await api.plans.recipe(meal.meal_id);
       setRecipe(result.recipe);
+      setMacroCheck(result.macro_check);
     } catch (err) {
       setRecipeError(
         err instanceof ApiError
@@ -167,10 +169,22 @@ export function MealCard({ meal, status, onLog, loggable }: Props) {
                   Ingredients
                 </p>
                 <ul className="space-y-1">
-                  {recipe.ingredients.map((item, i) => (
+                  {recipe.ingredients.map((ingredient, i) => (
                     <li key={i} className="text-sm text-ink flex gap-2">
                       <span className="text-brand-500">•</span>
-                      {item}
+                      <span>
+                        {ingredient.quantity_g != null && (
+                          <span className="font-medium tabular-nums">
+                            {ingredient.quantity_g}g{" "}
+                          </span>
+                        )}
+                        {ingredient.item}
+                        {ingredient.preparation && (
+                          <span className="text-ink-soft">
+                            , {ingredient.preparation}
+                          </span>
+                        )}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -197,10 +211,91 @@ export function MealCard({ meal, status, onLog, loggable }: Props) {
                   💡 {recipe.tips}
                 </p>
               )}
+
+              {macroCheck && <MacroCheckPanel check={macroCheck} />}
             </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * Shows what the ingredient weights actually add up to.
+ *
+ * The plan asserts a meal's macros; this is the arithmetic on what's in it.
+ * Surfacing both — and the gap between them — is the entire point: a number
+ * the user can check beats a number they have to trust.
+ */
+function MacroCheckPanel({ check }: { check: MacroCheck }) {
+  if (!check.reliable) {
+    return (
+      <div className="text-xs text-ink-muted border-t border-line pt-3">
+        Kaya recognised {Math.round(check.coverage * 100)}% of these ingredients
+        by weight, which isn&apos;t enough to verify the macros
+        {check.unmatched.length > 0 && (
+          <> — {check.unmatched.slice(0, 3).join(", ")} aren&apos;t in its table</>
+        )}
+        .
+      </div>
+    );
+  }
+
+  const kcalDrift =
+    check.claimed_kcal > 0
+      ? Math.abs(check.computed_kcal - check.claimed_kcal) / check.claimed_kcal
+      : 0;
+  const proteinDrift =
+    check.claimed_protein_g > 0
+      ? Math.abs(check.computed_protein_g - check.claimed_protein_g) /
+        check.claimed_protein_g
+      : 0;
+  // Matches the backend's RECIPE_MACRO_TOLERANCE.
+  const close = kcalDrift <= 0.3 && proteinDrift <= 0.3;
+
+  return (
+    <div className="border-t border-line pt-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted mb-2">
+        Checked against the ingredients
+      </p>
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <p className="text-xs text-ink-muted">Calories</p>
+          <p className="text-ink tabular-nums">
+            <span className="font-semibold">
+              {Math.round(check.computed_kcal)}
+            </span>
+            <span className="text-ink-muted">
+              {" "}
+              vs {check.claimed_kcal} planned
+            </span>
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-ink-muted">Protein</p>
+          <p className="text-ink tabular-nums">
+            <span className="font-semibold">
+              {Math.round(check.computed_protein_g)}g
+            </span>
+            <span className="text-ink-muted">
+              {" "}
+              vs {check.claimed_protein_g}g planned
+            </span>
+          </p>
+        </div>
+      </div>
+      <p
+        className={cn(
+          "text-xs mt-2",
+          close ? "text-brand-600" : "text-spice-600",
+        )}
+      >
+        {close
+          ? "The weights add up — these portions really do hit the plan."
+          : "The weights don't quite reach the plan's figures. Trust the computed numbers above over the planned ones."}
+      </p>
     </div>
   );
 }

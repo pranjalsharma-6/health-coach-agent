@@ -17,10 +17,19 @@ import type {
   PlanSummary,
   Profile,
   ProfileDraft,
+  MacroCheck,
   Recipe,
   TargetsResponse,
   WeightPoint,
 } from "./types";
+
+interface RecipeResponse {
+  meal_id: string;
+  meal_name: string;
+  recipe: Recipe;
+  cached: boolean;
+  macro_check: MacroCheck | null;
+}
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
@@ -192,7 +201,7 @@ export const api = {
     history: () => request<PlanSummary[]>("/plans/history"),
     byId: (id: string) => request<Plan>(`/plans/${id}`),
     recipe: (mealId: string) =>
-      request<{ meal_id: string; meal_name: string; recipe: Recipe; cached: boolean }>(
+      request<RecipeResponse>(
         `/plans/meals/${encodeURIComponent(mealId)}/recipe`,
         { method: "POST" },
       ),

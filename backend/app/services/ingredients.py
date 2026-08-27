@@ -224,6 +224,104 @@ def is_protein_claim_possible(
 # --------------------------------------------------------------------------- #
 # Lookup and prompt grounding
 # --------------------------------------------------------------------------- #
+def match(name: str) -> Optional[Ingredient]:
+    """Resolve a single ingredient name against the table.
+
+    Longest alias wins: "low fat paneer" must beat plain "paneer", and
+    "chicken breast" must beat "chicken", or the macros come out wrong.
+    """
+    lowered = name.lower().strip()
+    if not lowered:
+        return None
+
+    best: Optional[Ingredient] = None
+    best_len = 0
+
+    for item in _TABLE:
+        for term in (item.name.lower(), *item.aliases):
+            if term in lowered and len(term) > best_len:
+                best, best_len = item, len(term)
+
+    return best
+
+
+@dataclass(frozen=True)
+class RecipeAnalysis:
+    """Macros computed from an ingredient list, with an honesty score."""
+
+    kcal: float
+    protein_g: float
+    carbs_g: float
+    fat_g: float
+    #: Fraction of the recipe's total weighed mass we could identify.
+    coverage: float
+    matched: tuple[str, ...]
+    unmatched: tuple[str, ...]
+
+    @property
+    def is_reliable(self) -> bool:
+        """Whether the totals are worth comparing against a claim.
+
+        Below this, too much of the dish is unaccounted for and the computed
+        figure would understate it — reporting a mismatch then would blame the
+        model for our table's gaps.
+        """
+        return self.coverage >= MIN_COVERAGE_FOR_COMPARISON
+
+
+# Below this share of identified mass, the computed macros are treated as
+# indicative only — the gap is our table's, not the recipe's.
+MIN_COVERAGE_FOR_COMPARISON = 0.7
+
+
+def analyse_recipe(ingredients) -> RecipeAnalysis:
+    """Sum macros over a recipe's weighed ingredients.
+
+    Ingredients without a weight (a pinch of hing, two green chillies) are
+    skipped rather than guessed at — they contribute little, and inventing a
+    mass would put made-up numbers into a feature whose whole point is not
+    making numbers up.
+    """
+    kcal = protein = carbs = fat = 0.0
+    weighed_mass = matched_mass = 0.0
+    matched: List[str] = []
+    unmatched: List[str] = []
+
+    for entry in ingredients:
+        grams = getattr(entry, "quantity_g", None)
+        name = getattr(entry, "item", "") or ""
+
+        if not grams or grams <= 0:
+            continue
+
+        weighed_mass += grams
+        found = match(name)
+
+        if found is None:
+            unmatched.append(name)
+            continue
+
+        matched.append(name)
+        matched_mass += grams
+        scale = grams / 100.0
+        kcal += found.kcal * scale
+        protein += found.protein_g * scale
+        carbs += found.carbs_g * scale
+        fat += found.fat_g * scale
+
+    coverage = (matched_mass / weighed_mass) if weighed_mass else 0.0
+
+    return RecipeAnalysis(
+        kcal=round(kcal, 1),
+        protein_g=round(protein, 1),
+        carbs_g=round(carbs, 1),
+        fat_g=round(fat, 1),
+        coverage=round(coverage, 3),
+        matched=tuple(matched),
+        unmatched=tuple(unmatched),
+    )
+
+
 def find_in_text(text: str) -> Set[str]:
     """Return the keys of ingredients mentioned in a piece of text."""
     lowered = text.lower()

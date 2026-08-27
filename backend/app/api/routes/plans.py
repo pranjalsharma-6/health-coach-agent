@@ -11,9 +11,30 @@ from app.api.deps import CurrentProfile, CurrentUser
 from app.core.logging import get_logger
 from app.db.repositories import PlanRepository
 from app.models.plan import PlanInDB, PlanSummary, Recipe
+from app.services.ingredients import RecipeAnalysis, analyse_recipe
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 logger = get_logger(__name__)
+
+
+class MacroCheck(BaseModel):
+    """What the recipe's weights actually add up to, versus what it claims.
+
+    Returned to the client rather than kept internal: the point of computing
+    macros from ingredients is that the user can see the sum, so a gap is
+    visible instead of quietly papered over.
+    """
+
+    computed_kcal: float
+    computed_protein_g: float
+    claimed_kcal: int
+    claimed_protein_g: int
+    #: Share of the recipe's weighed mass found in the ingredient table.
+    coverage: float
+    #: False when coverage is too low for the comparison to be fair.
+    reliable: bool
+    #: Ingredients carrying a weight that we could not identify.
+    unmatched: List[str]
 
 
 class RecipeResponse(BaseModel):
@@ -21,6 +42,7 @@ class RecipeResponse(BaseModel):
     meal_name: str
     recipe: Recipe
     cached: bool
+    macro_check: Optional[MacroCheck] = None
 
 
 @router.get("/active", response_model=Optional[PlanInDB])
@@ -90,11 +112,15 @@ async def expand_recipe(
         )
 
     if target_meal.recipe is not None:
+        # Re-run the sum rather than storing it: the ingredient table can change,
+        # and a stale figure is worse than a recomputed one.
+        cached_analysis = analyse_recipe(target_meal.recipe.ingredients)
         return RecipeResponse(
             meal_id=meal_id,
             meal_name=target_meal.name,
             recipe=target_meal.recipe,
             cached=True,
+            macro_check=_to_macro_check(cached_analysis, target_meal),
         )
 
     if not is_configured():
@@ -104,7 +130,7 @@ async def expand_recipe(
         )
 
     try:
-        recipe = await generate_recipe(
+        recipe, analysis = await generate_recipe(
             meal_name=target_meal.name,
             description=target_meal.description,
             calories=target_meal.calories_kcal,
@@ -128,5 +154,21 @@ async def expand_recipe(
     await PlanRepository.replace_active(plan)
 
     return RecipeResponse(
-        meal_id=meal_id, meal_name=target_meal.name, recipe=recipe, cached=False
+        meal_id=meal_id,
+        meal_name=target_meal.name,
+        recipe=recipe,
+        cached=False,
+        macro_check=_to_macro_check(analysis, target_meal),
+    )
+
+
+def _to_macro_check(analysis: RecipeAnalysis, meal) -> MacroCheck:
+    return MacroCheck(
+        computed_kcal=analysis.kcal,
+        computed_protein_g=analysis.protein_g,
+        claimed_kcal=meal.calories_kcal,
+        claimed_protein_g=meal.protein_g,
+        coverage=analysis.coverage,
+        reliable=analysis.is_reliable,
+        unmatched=list(analysis.unmatched),
     )

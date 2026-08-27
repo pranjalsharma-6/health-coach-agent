@@ -27,6 +27,7 @@ from app.agent.llm import LLMUnavailableError, get_llm, get_structured_llm
 from app.agent.prompts import (
     RECIPE_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
+    build_recipe_correction,
     build_recipe_prompt,
     build_user_prompt,
 )
@@ -48,6 +49,7 @@ from app.services.adherence import (
     build_snapshot,
     describe_snapshot,
 )
+from app.services.ingredients import RecipeAnalysis, analyse_recipe
 from app.services.nutrition import calculate_targets
 
 logger = get_logger(__name__)
@@ -584,22 +586,92 @@ async def stream_agent(
 # --------------------------------------------------------------------------- #
 # Recipe expansion (outside the graph — enrichment, not a planning decision)
 # --------------------------------------------------------------------------- #
+# How far a recipe's summed weights may miss the meal's claimed macros.
+# Generous, because the ingredient table is approximate and portion sizes are
+# rounded to something a cook can actually measure.
+RECIPE_MACRO_TOLERANCE = 0.30
+MAX_RECIPE_ATTEMPTS = 2
+
+
 async def generate_recipe(
     meal_name: str,
     description: str,
     calories: int,
     protein_g: int,
     profile: ProfileInDB,
-) -> Recipe:
-    """Expand one planned meal into a full recipe, on demand."""
+) -> tuple[Recipe, RecipeAnalysis]:
+    """Expand one planned meal into a full recipe, verified against its macros.
+
+    The plan asserts a meal is 560 kcal and 48g protein. This sums what the
+    recipe actually contains and checks the two agree — turning a claim into
+    something computed. One correction attempt, then the recipe is returned
+    regardless: a slightly-off recipe the user can cook beats an error page,
+    and the analysis travels with it so the UI can be honest about the gap.
+    """
     structured = get_structured_llm(Recipe)
-    return await structured.ainvoke(
-        [
-            SystemMessage(content=RECIPE_SYSTEM_PROMPT),
+    messages = [
+        SystemMessage(content=RECIPE_SYSTEM_PROMPT),
+        HumanMessage(
+            content=build_recipe_prompt(
+                meal_name, description, calories, protein_g, profile
+            )
+        ),
+    ]
+
+    recipe: Recipe = await structured.ainvoke(messages)
+    analysis = analyse_recipe(recipe.ingredients)
+
+    for attempt in range(2, MAX_RECIPE_ATTEMPTS + 1):
+        if not analysis.is_reliable:
+            # Too little of the dish is in our table to judge it fairly.
+            logger.info(
+                "Recipe for '%s' covers only %.0f%% known ingredients — "
+                "skipping the macro check.",
+                meal_name,
+                analysis.coverage * 100,
+            )
+            break
+
+        if _macros_agree(analysis, calories, protein_g):
+            break
+
+        logger.info(
+            "Recipe for '%s' computes to %.0f kcal / %.0fg protein against a "
+            "claim of %d / %d — requesting a correction (attempt %d).",
+            meal_name,
+            analysis.kcal,
+            analysis.protein_g,
+            calories,
+            protein_g,
+            attempt,
+        )
+        messages.append(
             HumanMessage(
-                content=build_recipe_prompt(
-                    meal_name, description, calories, protein_g, profile
+                content=build_recipe_correction(
+                    meal_name, calories, protein_g, analysis.kcal, analysis.protein_g
                 )
-            ),
-        ]
-    )
+            )
+        )
+        recipe = await structured.ainvoke(messages)
+        analysis = analyse_recipe(recipe.ingredients)
+
+    return recipe, analysis
+
+
+def _macros_agree(
+    analysis: RecipeAnalysis, calories: int, protein_g: int
+) -> bool:
+    """Do the summed weights land near what the meal claims?"""
+    if calories <= 0:
+        return True
+
+    kcal_drift = abs(analysis.kcal - calories) / calories
+    if kcal_drift > RECIPE_MACRO_TOLERANCE:
+        return False
+
+    if protein_g > 0:
+        protein_drift = abs(analysis.protein_g - protein_g) / protein_g
+        if protein_drift > RECIPE_MACRO_TOLERANCE:
+            return False
+
+    return True
