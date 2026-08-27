@@ -148,12 +148,23 @@ export interface Meal {
   logged_at: string | null;
 }
 
+export interface ExercisePrescription {
+  name: string;
+  sets: number;
+  /** Text, because reps and durations differ in kind: "8-12", "30 seconds". */
+  reps: string;
+  rest_seconds: number;
+  cue: string | null;
+}
+
 export interface Activity {
   activity_type: string;
   duration_minutes: number;
   intensity: string;
   description: string;
   target_steps: number;
+  /** Empty on a rest day, and on nothing else. */
+  exercises: ExercisePrescription[];
 }
 
 export interface DailyPlan {

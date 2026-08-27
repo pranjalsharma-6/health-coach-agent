@@ -141,16 +141,52 @@ class MealItem(BaseModel):
     logged_at: Optional[datetime] = None
 
 
+class ExercisePrescription(BaseModel):
+    """One movement, with enough detail to actually perform it.
+
+    "Upper body training, 45 min" is a category, not a prescription. A beginner
+    cannot act on it and nothing downstream can check it. Sets, reps and rest
+    make it followable; naming an exercise from the table makes it verifiable.
+    """
+
+    name: str = Field(
+        description=(
+            "Exact name from the provided exercise list. Do not invent "
+            "exercises or rename them."
+        )
+    )
+    sets: int = Field(description="Number of working sets.", ge=1, le=10)
+    reps: str = Field(
+        description=(
+            "Reps or duration as text, since these differ in kind: '8-12', "
+            "'30 seconds', '10 each side', '20 minutes'."
+        )
+    )
+    rest_seconds: int = Field(
+        default=90, description="Rest between sets. 0 for continuous work.", ge=0, le=300
+    )
+    cue: Optional[str] = Field(
+        default=None,
+        description=(
+            "One short form cue. Left empty is fine — the table's own cue is "
+            "used, which is more reliable than a generated one."
+        ),
+    )
+
+
 class ActivityItem(BaseModel):
     """The day's movement prescription."""
 
     activity_type: str = Field(
-        description="e.g. 'Strength training — upper body', 'Brisk walk', 'Rest'."
+        description="e.g. 'Strength training — full body', 'Easy cardio', 'Rest'."
     )
     duration_minutes: int = Field(description="Suggested duration; 0 for a rest day.")
     intensity: str = Field(description="One of: low, moderate, high.")
     description: str = Field(description="One sentence on the goal of this session.")
     target_steps: int = Field(default=8000, description="Daily step target.")
+
+    # Empty on a rest day, and on nothing else.
+    exercises: List[ExercisePrescription] = Field(default_factory=list)
 
 
 class DailyPlan(BaseModel):

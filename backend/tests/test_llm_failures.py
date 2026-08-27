@@ -313,9 +313,11 @@ class TestOutputBudgets:
     # the fan-out has to fit inside *some* stated limit, not this exact one.
     FREE_TIER_TPM = 8000
 
-    # Measured from the real builders, rounded up.
-    NUTRITIONIST_PROMPT = 1250
-    TRAINER_PROMPT = 600
+    # Measured from the real builders against a profile with allergies,
+    # dislikes and three cuisines — the largest prompt a real user produces.
+    # The trainer's grew when it started carrying the exercise list.
+    NUTRITIONIST_PROMPT = 1000
+    TRAINER_PROMPT = 700
 
     def test_the_concurrent_fan_out_fits_the_free_tier(self):
         """Both specialists run in one superstep, so their reservations land in

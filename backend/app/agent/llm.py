@@ -26,8 +26,8 @@ MAX_OUTPUT_TOKENS: Dict[str, int] = {
     # The meal budget also has to cover a reasoning model's thinking tokens,
     # which are spent before the answer begins. Sized to the largest value the
     # fan-out can afford against an 8000 TPM tier, not to the answer alone.
-    "MealPlanDraft": 5000,      # 7 days x ~4 meals, each with macros
-    "TrainingPlanDraft": 800,   # 7 days x 1 activity
+    "MealPlanDraft": 4400,      # 7 days x ~4 meals, each with macros
+    "TrainingPlanDraft": 1600,  # 7 days x a session of named exercises
     "PlanCritique": 700,        # a verdict and a short list of issues
     "Recipe": 1200,             # ingredients, steps, tips for one meal
 }

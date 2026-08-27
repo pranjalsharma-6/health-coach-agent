@@ -68,6 +68,7 @@ def validate_plan(
     for day in plan.daily_plans:
         _check_day_totals(day, targets, result)
         _check_meal_plausibility(day, targets, diet, result)
+        _check_training_session(day, profile, result)
 
     if result.errors:
         logger.warning(
@@ -272,3 +273,46 @@ def build_retry_feedback(result: ValidationResult) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# Training
+# --------------------------------------------------------------------------- #
+def _check_training_session(
+    day: DailyPlan, profile: ProfileInDB, result: ValidationResult
+) -> None:
+    """Is this session something the user can actually do?
+
+    The same division as everywhere else: the model chooses the movements, and
+    deterministic code checks the choice is feasible. What counts as good
+    programming is the model's to argue; what counts as *followable* is not.
+
+    A missing session is an error rather than a warning — "Strength training,
+    45 min" with no exercises is the exact failure this exists to stop, and it
+    was the shipped behaviour.
+    """
+    from app.agent.prompts import training_level_for
+    from app.services.exercises import find_problems
+
+    activity = day.activity
+    is_rest = activity.duration_minutes == 0 or "rest" in activity.activity_type.lower()
+
+    if is_rest:
+        if activity.exercises:
+            result.warnings.append(
+                f"Day {day.day} is a rest day but lists exercises."
+            )
+        return
+
+    if not activity.exercises:
+        result.errors.append(
+            f"Day {day.day} prescribes '{activity.activity_type}' with no "
+            "exercises. A category is not a session someone can follow."
+        )
+        return
+
+    problems = find_problems(
+        [e.name for e in activity.exercises], training_level_for(profile)
+    )
+    for problem in problems:
+        result.errors.append(f"Day {day.day}: {problem}")

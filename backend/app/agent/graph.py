@@ -66,6 +66,7 @@ from app.agent.prompts import (
     build_trainer_prompt,
 )
 from app.agent.state import AgentState, new_state, step
+from app.services.exercises import cue_for
 from app.agent.validators import build_retry_feedback, validate_plan
 from app.core.logging import get_logger
 from app.db.repositories import (
@@ -445,6 +446,19 @@ async def plan_training_node(state: AgentState) -> Dict[str, Any]:
         }
 
 
+def _fill_in_form_cues(activity: ActivityItem) -> None:
+    """Fill any missing form cue from the exercise table.
+
+    The cue is the reason a beginner can act on the session at all, and the
+    table's is more reliable than a generated one — it is written once and
+    reviewed, rather than improvised per request. The model is told it may
+    leave `cue` empty; this is what makes that instruction safe.
+    """
+    for exercise in activity.exercises:
+        if not (exercise.cue or "").strip():
+            exercise.cue = cue_for(exercise.name)
+
+
 async def assemble_node(state: AgentState) -> Dict[str, Any]:
     """Zip the two halves into one plan."""
     if state.get("error"):
@@ -467,6 +481,10 @@ async def assemble_node(state: AgentState) -> Dict[str, Any]:
         description="Recovery day — the trainer didn't cover this one.",
         target_steps=6000,
     )
+
+    for day_training in by_day.values():
+        _fill_in_form_cues(day_training)
+    _fill_in_form_cues(fallback)
 
     daily_plans = [
         DailyPlan(

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AgentRunner } from "@/components/AgentRunner";
 import { MealCard } from "@/components/MealCard";
+import { SessionCard } from "@/components/SessionCard";
 import { MetricsLogger } from "@/components/MetricsLogger";
 import { WeightChart } from "@/components/WeightChart";
 import {
@@ -353,23 +354,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="px-5 py-4 space-y-3">
-                  <div className="rounded-xl bg-raised px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted mb-1">
-                      Movement
-                    </p>
-                    <p className="font-medium text-ink">
-                      {day.activity.activity_type}
-                      {day.activity.duration_minutes > 0 && (
-                        <span className="text-ink-soft font-normal">
-                          {" "}
-                          · {day.activity.duration_minutes} min
-                        </span>
-                      )}
-                    </p>
-                    <p className="text-sm text-ink-soft mt-0.5">
-                      {day.activity.description}
-                    </p>
-                  </div>
+                  <SessionCard activity={day.activity} />
 
                   {day.meals.map((meal) => (
                     <MealCard

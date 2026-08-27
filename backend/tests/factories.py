@@ -79,6 +79,30 @@ def make_meal(
     )
 
 
+# A valid beginner session: four patterns, all bodyweight or dumbbell, all in
+# the exercise table. Shared so a change to the training rules shows up as one
+# failing fixture rather than twenty.
+def make_exercises() -> list:
+    from app.models.plan import ExercisePrescription
+
+    return [
+        ExercisePrescription(name="Push-ups", sets=3, reps="8-12", rest_seconds=90),
+        ExercisePrescription(name="Dumbbell row", sets=3, reps="10", rest_seconds=90),
+        ExercisePrescription(name="Goblet squat", sets=3, reps="10-15", rest_seconds=90),
+        ExercisePrescription(name="Plank", sets=3, reps="30 seconds", rest_seconds=60),
+    ]
+
+
+def make_cardio_exercises() -> list:
+    from app.models.plan import ExercisePrescription
+
+    return [
+        ExercisePrescription(
+            name="Brisk walk", sets=1, reps="30 minutes", rest_seconds=0
+        )
+    ]
+
+
 def make_day(day: int, targets: NutritionTargets, meals_per_day: int = 4) -> DailyPlan:
     """Build a day whose totals land on the targets."""
     slots = [MealType.BREAKFAST, MealType.LUNCH, MealType.DINNER, MealType.SNACK]
@@ -110,6 +134,7 @@ def make_day(day: int, targets: NutritionTargets, meals_per_day: int = 4) -> Dai
             intensity="moderate",
             description="Compound lifts, focus on form.",
             target_steps=8000,
+            exercises=make_exercises(),
         ),
     )
 
@@ -219,16 +244,18 @@ def make_training_draft(days: int = 7) -> "TrainingPlanDraft":
                 description="Full recovery day.",
                 target_steps=6000,
             )
+        hard = bool(day % 2)
         return ActivityItem(
-            activity_type="Strength training — full body"
-            if day % 2
-            else "Brisk walk",
-            duration_minutes=45 if day % 2 else 30,
-            intensity="moderate" if day % 2 else "low",
-            description="Compound lifts, focus on form."
-            if day % 2
-            else "Easy pace, keep it conversational.",
+            activity_type="Strength training — full body" if hard else "Brisk walk",
+            duration_minutes=45 if hard else 30,
+            intensity="moderate" if hard else "low",
+            description=(
+                "Compound lifts, focus on form."
+                if hard
+                else "Easy pace, keep it conversational."
+            ),
             target_steps=8000,
+            exercises=make_exercises() if hard else make_cardio_exercises(),
         )
 
     return TrainingPlanDraft(

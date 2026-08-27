@@ -535,6 +535,56 @@ def build_nutritionist_prompt(
     return "\n".join(sections)
 
 
+def training_level_for(profile: ProfileInDB) -> "Level":
+    """Infer a training level from what onboarding actually asks.
+
+    There is no fitness-experience question yet, so activity level is the
+    proxy. It errs low deliberately: prescribing a barbell deadlift to someone
+    who has never lifted is a worse failure than prescribing goblet squats to
+    someone who has.
+    """
+    from app.services.exercises import Level
+
+    level = str(profile.activity_level)
+    if level in {"very_active", "extremely_active"}:
+        return Level.INTERMEDIATE
+    return Level.BEGINNER
+
+
+def build_exercise_block(profile: ProfileInDB) -> str:
+    """The exercises the trainer may choose from, grouped by pattern.
+
+    The counterpart to grounding the nutritionist in the ingredient table. A
+    model asked for "an upper body session" invents plausible-sounding names;
+    a model handed a list picks from movements that exist, at a difficulty the
+    user can perform, with a form cue already written.
+    """
+    from app.services.exercises import Pattern, allowed_for
+
+    level = training_level_for(profile)
+    available = allowed_for(level)
+
+    lines = [
+        "## EXERCISE LIST — choose only from these, by exact name",
+        "",
+        f"Selected for a {level.value} trainee using bodyweight, dumbbells or "
+        "bands. Anything not on this list is unavailable, however well it would "
+        "fit.",
+        "",
+    ]
+
+    for pattern in Pattern:
+        matching = [e for e in available if e.pattern is pattern]
+        if not matching:
+            continue
+        names = ", ".join(
+            f"{e.name} ({e.default_sets}x{e.default_reps})" for e in matching
+        )
+        lines.append(f"**{pattern.value}:** {names}")
+
+    return "\n".join(lines)
+
+
 def build_trainer_prompt(
     profile: ProfileInDB,
     decision: AgentDecision,
@@ -577,12 +627,22 @@ def build_trainer_prompt(
             "cut the volume rather than repeating it with more encouragement.\n"
         )
 
+    sections.extend([build_exercise_block(profile), ""])
+
     sections.append(
         f"""## OUTPUT REQUIREMENTS
 
 - Exactly **{duration_days} days**, numbered 1 to {duration_days}.
-- One activity per day. Rest days are activities too — name them plainly and set
-  `duration_minutes` to 0.
+- One activity per day. Rest days are activities too — name them plainly, set
+  `duration_minutes` to 0 and leave `exercises` empty.
+- **Every non-rest day must list its exercises**, each with sets, reps and rest.
+  "Upper body training" on its own is not a plan anyone can follow.
+- Use exact names from the exercise list. Do not invent or rename movements.
+- 3 to 5 exercises for a strength session; 1 to 2 for a cardio or mobility day.
+- A strength session of three or more movements must train more than one
+  pattern — do not build a session entirely out of pushes.
+- Leave `cue` empty unless you have something to add. The list's own cue is
+  used by default and is more reliable than a generated one.
 - `reasoning` is two to three sentences on the shape of the week: the split, the
   progression, and where recovery sits."""
     )
