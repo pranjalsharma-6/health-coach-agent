@@ -1,0 +1,44 @@
+# Render Blueprint for the Kaya API.
+#
+# Deploys the backend only. The frontend goes to Vercel, which serves it from a
+# CDN edge with no cold start at all — the thing that made the Streamlit
+# deployment feel broken to anyone opening the link cold.
+#
+# To use: Render dashboard → New → Blueprint → point at this repo.
+# Secrets marked `sync: false` are entered in the dashboard, never committed.
+
+services:
+  - type: web
+    name: kaya-api
+    runtime: python
+    plan: free
+    region: singapore # closest to most users of this project; change if needed
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+    # Render polls this; it also gives the keepalive workflow a target.
+    healthCheckPath: /health
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: MONGODB_DB_NAME
+        value: KayaDB
+
+      # --- Set these in the Render dashboard ---
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        # Render generates a strong value on first deploy.
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
+      # Your Vercel URL, comma-separated. Without this the browser blocks
+      # every request from the frontend as a CORS failure.
+      - key: CORS_ORIGINS
+        sync: false

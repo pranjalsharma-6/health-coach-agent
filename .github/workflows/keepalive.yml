@@ -1,0 +1,46 @@
+name: Keep API warm
+
+# Free hosting tiers spin a container down after ~15 minutes idle, and the next
+# visitor pays a 30-60 second cold boot. That is exactly what made the old
+# Streamlit link look broken to anyone opening it for the first time.
+#
+# Pinging /health on a schedule keeps the container up and the Mongo connection
+# pool warm, so a recruiter clicking the link gets a response immediately.
+#
+# Set the repository variable KAYA_API_URL (Settings → Secrets and variables →
+# Actions → Variables) to your deployed base URL, e.g.
+# https://kaya-api.onrender.com — the job skips itself until you do.
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub's scheduler is best-effort and often runs late
+    # under load; that is fine here, the target is "usually warm", not a SLA.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        env:
+          API_URL: ${{ vars.KAYA_API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "KAYA_API_URL is not set — nothing to ping. Skipping."
+            exit 0
+          fi
+
+          # Generous timeout: a cold start is the case we are paying for, and
+          # waking it slowly still beats leaving the next visitor to do it.
+          code=$(curl -sS -o /tmp/health.json -w '%{http_code}' \
+                   --max-time 90 --retry 2 --retry-delay 15 \
+                   "${API_URL%/}/health" || echo "000")
+
+          echo "HTTP $code"
+          cat /tmp/health.json 2>/dev/null || true
+          echo
+
+          if [ "$code" != "200" ]; then
+            echo "::warning::Health check returned $code"
+          fi

@@ -13,6 +13,7 @@ your week — without being asked.
 
 📄 **[Full problem statement](docs/PROBLEM_STATEMENT.md)** ·
 🛠 **[Architecture & setup](#running-it-locally)** ·
+🚀 **[Deployment](docs/DEPLOYMENT.md)** ·
 🚚 **[Migrating from the Streamlit version](docs/MIGRATION.md)**
 
 ![Landing page](docs/screenshots/landing.png)
@@ -191,7 +192,9 @@ Three things changed:
    read; they're generated per meal, on demand, and cached.
 
 There's also a `/health` endpoint suitable for an uptime pinger, which stops a free-tier
-host from spinning the container down between visitors.
+host from spinning the container down between visitors — `.github/workflows/keepalive.yml`
+does exactly that. See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for the full
+Render + Vercel + Atlas setup.
 
 ---
 
@@ -201,6 +204,8 @@ host from spinning the container down between visitors.
 - [x] Deterministic safety layer with validation retry
 - [x] Streamed agent runs and decision history
 - [x] Adaptive rebalancing on skipped meals
+- [x] Weight, steps, sleep and water logging with a real trend chart
+- [x] CI on push; Docker, Render blueprint and deployment guide
 - [ ] Nutrition-database grounding (USDA FoodData Central)
 - [ ] Google Fit / Fitbit OAuth for passive sensing
 - [ ] Weekly email digests
