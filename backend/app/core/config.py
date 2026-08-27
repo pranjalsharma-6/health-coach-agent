@@ -1,10 +1,11 @@
 """Application configuration, loaded from environment variables."""
 
+import json
 from functools import lru_cache
-from typing import List
+from typing import Annotated, List
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -36,17 +37,34 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.4)
 
     # --- CORS ---
-    cors_origins: List[str] = Field(
+    # `NoDecode` is load-bearing. Without it pydantic-settings sees a list-typed
+    # field and runs `json.loads` on the raw environment value *inside the env
+    # source*, before any validator gets a look — so the comma-separated form
+    # every deployment doc reaches for dies with "Expecting value: line 1
+    # column 1" and the app never starts.
+    cors_origins: Annotated[List[str], NoDecode] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"]
     )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, v):
-        """Allow CORS_ORIGINS to be a comma-separated string in the environment."""
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+        """Accept CORS_ORIGINS as comma-separated or as a JSON array.
+
+        Comma-separated is what the docs tell you to paste into Render. JSON is
+        what a platform that round-trips config through JSON may hand back, and
+        what the old list-typed field used to require — so both keep working.
+        """
+        if not isinstance(v, str):
+            return v
+
+        text = v.strip()
+        if text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass  # fall through and treat it as comma-separated
+        return [origin.strip() for origin in text.split(",") if origin.strip()]
 
     @property
     def is_production(self) -> bool:
