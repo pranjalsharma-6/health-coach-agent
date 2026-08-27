@@ -74,6 +74,13 @@ class AdherenceSnapshot(BaseModel):
     """
 
     date: date
+
+    # Which day of the plan this date maps to, 1-based, or None when there is
+    # no active plan. Published so the client does not have to re-derive it:
+    # when the two disagree they read different meals, the meal_ids do not
+    # match, and every logged meal silently reads as unlogged.
+    plan_day: Optional[int] = None
+
     meals_planned: int
     meals_eaten: int
     meals_skipped: int

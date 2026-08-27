@@ -119,15 +119,40 @@ export default function DashboardPage() {
     };
   }, [authLoading, user, fetchDashboard, applyDashboard]);
 
-  /** Which day of the plan corresponds to today. */
+  /** Which day of the plan corresponds to today.
+   *
+   * The server publishes this on the snapshot, and it is the number that
+   * matters: adherence is computed against that day's meals, matched by
+   * meal_id. When the client picks a different day it renders meals whose ids
+   * the server never looked at, so every logged meal reads as unlogged and the
+   * header sits at zero while the cards show "Eaten".
+   *
+   * That is exactly what happened: this used to divide elapsed milliseconds by
+   * 24 hours while the server took a calendar-date difference. The two
+   * disagree for the whole period after midnight but before the 24-hour mark.
+   *
+   * The local calculation survives only as a fallback for when there is no
+   * snapshot yet, and it now matches the server's method — whole days between
+   * calendar dates, not elapsed time.
+   */
   const todayIndex = useMemo(() => {
     if (!plan?.daily_plans.length) return 0;
+
+    if (snapshot?.plan_day != null) {
+      return Math.min(
+        Math.max(snapshot.plan_day - 1, 0),
+        plan.daily_plans.length - 1,
+      );
+    }
+
     const created = new Date(plan.created_at);
+    const startOfDay = (d: Date) =>
+      Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
     const elapsed = Math.floor(
-      (Date.now() - created.getTime()) / (1000 * 60 * 60 * 24),
+      (startOfDay(new Date()) - startOfDay(created)) / (1000 * 60 * 60 * 24),
     );
     return Math.max(0, elapsed) % plan.daily_plans.length;
-  }, [plan]);
+  }, [plan, snapshot]);
 
   // The tab defaults to today and only diverges once the user picks another
   // day. Deriving it from an optional override avoids syncing state in an

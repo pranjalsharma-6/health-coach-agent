@@ -192,6 +192,8 @@ export interface PlanSummary {
 
 export interface AdherenceSnapshot {
   date: string;
+  /** 1-based day of the plan this date maps to; null with no active plan. */
+  plan_day: number | null;
   meals_planned: number;
   meals_eaten: number;
   meals_skipped: number;

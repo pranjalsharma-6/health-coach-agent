@@ -32,6 +32,7 @@ def build_snapshot(
     """Compute the day's adherence picture."""
     plan_day = _resolve_plan_day(plan, target_date)
     planned_meals = plan_day.meals if plan_day else []
+    plan_day_number = plan_day.day if plan_day else None
 
     logged = {entry.meal_id: entry for entry in (today_log.meals if today_log else [])}
 
@@ -67,6 +68,7 @@ def build_snapshot(
 
     return AdherenceSnapshot(
         date=target_date,
+        plan_day=plan_day_number,
         meals_planned=total_planned,
         meals_eaten=eaten,
         meals_skipped=skipped,
