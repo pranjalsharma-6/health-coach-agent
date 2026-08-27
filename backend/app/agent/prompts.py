@@ -12,6 +12,7 @@ from app.models.enums import AgentDecision, Cuisine, DietType, Goal, MealType
 from app.models.log import AdherenceSnapshot
 from app.models.plan import NutritionTargets, PlanInDB
 from app.models.profile import ProfileInDB
+from app.services.ingredients import protein_reference_block
 
 # --------------------------------------------------------------------------- #
 # Static guidance
@@ -187,6 +188,14 @@ def build_constraints_block(profile: ProfileInDB) -> str:
 
     if profile.medical_notes:
         lines.append(f"**Medical notes:** {profile.medical_notes}")
+
+    # Ground the model in real foods with real numbers. Protein is the hardest
+    # target to hit — especially on vegetarian and vegan diets — and without a
+    # reference the model tends to assert a figure rather than build a meal that
+    # reaches it.
+    reference = protein_reference_block(diet)
+    if reference:
+        lines.extend(["", reference])
 
     return "\n".join(lines)
 

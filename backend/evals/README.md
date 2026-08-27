@@ -42,13 +42,14 @@ The report prints a **confusion matrix**, so a systematic bias — say, reaching
 for a structural replan when a day rebalance would do — shows up as an
 off-diagonal cluster rather than a single failing assertion.
 
-### 2. Validator detection — 17 scored cases
+### 2. Validator detection — 19 scored cases
 
 Deliberately broken plans, checking the safety layer actually catches them:
 diet violations across all six diet types, allergens hidden in descriptions,
 protein below the floor, calories outside tolerance, macros that don't reconcile
-with their own calorie count, structural faults, and one case that must *not*
-fire (`hamper` must not trip the `ham` keyword).
+with their own calorie count, structural faults, a protein density no food on
+that diet can reach, and two cases that must *not* fire (`hamper` must not trip
+the `ham` keyword; chicken-breast density must not read as a hallucination).
 
 Two failure modes are reported separately because they cost different things:
 

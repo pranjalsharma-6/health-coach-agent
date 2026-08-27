@@ -388,6 +388,31 @@ def _duplicate_ids(plan: HealthPlan, _targets: NutritionTargets) -> None:
     plan.daily_plans[1].meals[0].meal_id = plan.daily_plans[0].meals[0].meal_id
 
 
+
+def _impossible_protein_density(plan: HealthPlan, _targets: NutritionTargets) -> None:
+    """Macros that reconcile perfectly but describe an impossible food.
+
+    200 kcal of pure protein is exactly 50g by the 4 kcal/g rule, so the
+    reconciliation check is satisfied — but 0.25 g/kcal is beyond anything a
+    vegetarian diet can reach.
+    """
+    meal = plan.daily_plans[0].meals[0]
+    meal.calories_kcal = 200
+    meal.protein_g = 50
+    meal.carbs_g = 0
+    meal.fat_g = 0
+
+
+def _lean_meat_density(plan: HealthPlan, _targets: NutritionTargets) -> None:
+    """Chicken-breast density — high, but entirely real."""
+    meal = plan.daily_plans[0].meals[1]
+    meal.name = "Grilled chicken breast with salad"
+    meal.calories_kcal = 330
+    meal.protein_g = 62
+    meal.carbs_g = 8
+    meal.fat_g = 7
+
+
 VALIDATOR_CASES: List[ValidatorCase] = [
     ValidatorCase("clean_plan", should_reject=False),
     ValidatorCase(
@@ -454,6 +479,25 @@ VALIDATOR_CASES: List[ValidatorCase] = [
     ValidatorCase("calories_far_over", should_reject=True, mutate=_inflate_calories),
     ValidatorCase(
         "macros_do_not_reconcile", should_reject=True, mutate=_impossible_macros
+    ),
+    ValidatorCase(
+        "impossible_protein_density",
+        should_reject=True,
+        mutate=_impossible_protein_density,
+        note=(
+            "Macros reconcile exactly, so only the ingredient-derived density "
+            "ceiling catches this one."
+        ),
+    ),
+    ValidatorCase(
+        "lean_meat_density_is_possible",
+        should_reject=False,
+        diet=DietType.NON_VEGETARIAN,
+        mutate=_lean_meat_density,
+        note=(
+            "Guards the ceiling against false positives: 0.19 g/kcal is chicken "
+            "breast, not a hallucination."
+        ),
     ),
     ValidatorCase("wrong_meal_count", should_reject=True, mutate=_drop_a_meal),
     ValidatorCase("duplicate_meal_ids", should_reject=True, mutate=_duplicate_ids),

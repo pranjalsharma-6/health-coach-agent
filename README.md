@@ -82,6 +82,19 @@ declared allergen, misses the protein floor, drifts outside calorie tolerance, o
 macros that don't reconcile with its own calorie count. Rejected plans are regenerated
 with targeted feedback, up to three attempts.
 
+The last check is grounded rather than arithmetic. A curated
+[ingredient table](backend/app/services/ingredients.py) derives, per diet, the highest
+protein density any real food can reach — 0.15 g/kcal for vegan, 0.24 for non-vegetarian.
+A meal claiming 50g of protein in 200 kcal with no carbs or fat *reconciles perfectly*
+under the 4/4/9 rule and is still impossible; only the ceiling catches it. The same table
+grounds the planner's prompt, so the model builds meals from foods that exist with numbers
+that are approximately right, instead of asserting a figure it likes.
+
+Why a curated table and not USDA FoodData Central: USDA has effectively no coverage of the
+food Kaya plans — no rajma chawal, no poha, no chapati as anyone in India makes one. A
+nutrition database that doesn't know the cuisine is worse than none, because it returns
+confident wrong numbers.
+
 ### Diet types modelled properly
 
 "Vegetarian" is not one thing. Kaya models **vegetarian, eggetarian, vegan, Jain,
@@ -149,7 +162,7 @@ Open <http://localhost:3000>.
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-python -m pytest -q          # 98 tests
+python -m pytest -q          # 261 tests
 python -m evals.run          # agent evaluation report
 ```
 
@@ -166,7 +179,7 @@ The suite has three layers:
   edge case where the floor pushes a very small, very sedentary user *above*
   maintenance — and the user-facing copy that got that case wrong.
 - **[Agent evals](backend/evals/README.md)** — 13 decision scenarios with a confusion
-  matrix, and 17 validator cases split into false positives (burns a retry) and false
+  matrix, and 19 validator cases split into false positives (burns a retry) and false
   negatives (lets a bad plan through). Two known misses are recorded in the suite and
   excluded from the score, because a detector evaluated only on cases it was built to
   catch always reports 100%.
@@ -183,9 +196,9 @@ backend/
     core/         config, security, logging
     db/           Mongo lifecycle + repositories
     models/       Pydantic domain models and enums
-    services/     nutrition math, adherence evaluation
+    services/     nutrition math, adherence evaluation, ingredient table
   evals/          agent evaluation suite (decisions + validator detection)
-  tests/          98 tests — examples, properties, API integration, evals
+  tests/          261 tests — examples, properties, API integration, evals
 frontend/
   app/            landing · login · register · onboarding · dashboard
   components/     agent runner, meal cards, UI primitives
@@ -225,8 +238,9 @@ Render + Vercel + Atlas setup.
 - [x] Weight, steps, sleep and water logging with a real trend chart
 - [x] CI on push; Docker, Render blueprint and deployment guide
 - [x] Property-based safety proofs and an agent evaluation suite
-- [ ] Ingredient-level macro grounding (USDA has poor Indian-food coverage,
-      so this likely needs a curated table rather than a single API)
+- [x] Curated ingredient table grounding the protein ceiling and the planner prompt
+- [ ] Per-ingredient quantities in recipes, so a meal's macros can be computed
+      from its ingredient list rather than only bounded
 - [ ] Google Fit / Fitbit OAuth for passive sensing
 - [ ] Weekly email digests
 - [ ] Multi-agent split: nutritionist + trainer + critic

@@ -17,6 +17,7 @@ from app.core.logging import get_logger
 from app.models.enums import DietType
 from app.models.plan import DailyPlan, HealthPlan, NutritionTargets
 from app.models.profile import ProfileInDB
+from app.services.ingredients import is_protein_claim_possible, protein_ceiling
 from app.services.nutrition import (
     KCAL_PER_G_CARB,
     KCAL_PER_G_FAT,
@@ -63,9 +64,10 @@ def validate_plan(
     _check_diet_compliance(plan, profile, result)
     _check_allergens(plan, profile, result)
 
+    diet = DietType(profile.diet_type)
     for day in plan.daily_plans:
         _check_day_totals(day, targets, result)
-        _check_meal_plausibility(day, targets, result)
+        _check_meal_plausibility(day, targets, diet, result)
 
     if result.errors:
         logger.warning(
@@ -199,7 +201,10 @@ def _check_day_totals(
 
 
 def _check_meal_plausibility(
-    day: DailyPlan, targets: NutritionTargets, result: ValidationResult
+    day: DailyPlan,
+    targets: NutritionTargets,
+    diet: DietType,
+    result: ValidationResult,
 ) -> None:
     """Catch physically impossible meals and lopsided days."""
     max_meal_kcal = targets.calories_kcal * MAX_SINGLE_MEAL_FRACTION
@@ -230,6 +235,19 @@ def _check_meal_plausibility(
                 f"Day {day.day} {meal.meal_type} ('{meal.name}') claims "
                 f"{meal.calories_kcal} kcal but its macros total {derived} kcal — "
                 "these are inconsistent."
+            )
+
+        # Reconciliation alone can't catch this: 50g protein with no carbs or
+        # fat in a 200 kcal meal adds up perfectly and is still impossible.
+        # No food available on this diet is that protein-dense.
+        if not is_protein_claim_possible(meal.calories_kcal, meal.protein_g, diet):
+            density = meal.protein_g / meal.calories_kcal
+            result.errors.append(
+                f"Day {day.day} {meal.meal_type} ('{meal.name}') claims "
+                f"{meal.protein_g}g protein in {meal.calories_kcal} kcal "
+                f"({density:.2f} g/kcal). Nothing available on a {diet.label} "
+                f"diet exceeds {protein_ceiling(diet):.2f} g/kcal, so this meal "
+                "cannot exist as described."
             )
 
 
