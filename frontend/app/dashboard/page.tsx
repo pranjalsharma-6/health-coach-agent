@@ -212,8 +212,15 @@ export default function DashboardPage() {
         {targets?.safety_floor_applied && (
           <Alert tone="warning" title="Your target was raised for safety">
             The timeline you set implied a calorie target below what&apos;s safe,
-            so Kaya raised it. You&apos;ll lose weight slightly slower than
-            planned — deliberately.
+            so Kaya raised it to {targets.targets.calories_kcal} kcal.{" "}
+            {/* The floor can push the target above maintenance for a very small
+                or very sedentary person, in which case "you'll lose slower" is
+                simply false. Say what the numbers actually imply. */}
+            {targets.estimated_weekly_change_kg > 0
+              ? `That's above your maintenance level, so you'd gain about ${targets.estimated_weekly_change_kg} kg a week at this intake. Worth talking to a doctor or dietitian before following it.`
+              : targets.estimated_weekly_change_kg === 0
+                ? "That's roughly your maintenance level, so your weight should hold steady."
+                : "You'll lose weight slightly slower than planned — deliberately."}
           </Alert>
         )}
 

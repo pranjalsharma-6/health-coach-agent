@@ -144,15 +144,32 @@ npm run dev
 
 Open <http://localhost:3000>.
 
-### Tests
+### Tests and evals
 
 ```bash
-cd backend && ./venv/bin/python -m pytest -q
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest -q          # 98 tests
+python -m evals.run          # agent evaluation report
 ```
 
-78 tests, no database server or LLM required — the nutrition math, the agent's decision
-rules, plan validation, and the full HTTP path against an in-memory Mongo with a stubbed
-model.
+No database server, LLM or network required — the API tests run against an in-memory
+Mongo with a stubbed model, and the agent's decision rules are plain Python.
+
+The suite has three layers:
+
+- **Example tests** — nutrition maths, decision rules, validation, and the full HTTP
+  path including auth and tenant isolation.
+- **Property tests** — invariants across the *entire* valid input space rather than
+  chosen examples: no profile anywhere produces a target below the calorie floor, fat
+  never drops under the essential minimum, macros always reconcile. Hypothesis found the
+  edge case where the floor pushes a very small, very sedentary user *above*
+  maintenance — and the user-facing copy that got that case wrong.
+- **[Agent evals](backend/evals/README.md)** — 13 decision scenarios with a confusion
+  matrix, and 17 validator cases split into false positives (burns a retry) and false
+  negatives (lets a bad plan through). Two known misses are recorded in the suite and
+  excluded from the score, because a detector evaluated only on cases it was built to
+  catch always reports 100%.
 
 ---
 
@@ -167,7 +184,8 @@ backend/
     db/           Mongo lifecycle + repositories
     models/       Pydantic domain models and enums
     services/     nutrition math, adherence evaluation
-  tests/          78 tests
+  evals/          agent evaluation suite (decisions + validator detection)
+  tests/          98 tests — examples, properties, API integration, evals
 frontend/
   app/            landing · login · register · onboarding · dashboard
   components/     agent runner, meal cards, UI primitives
@@ -206,7 +224,9 @@ Render + Vercel + Atlas setup.
 - [x] Adaptive rebalancing on skipped meals
 - [x] Weight, steps, sleep and water logging with a real trend chart
 - [x] CI on push; Docker, Render blueprint and deployment guide
-- [ ] Nutrition-database grounding (USDA FoodData Central)
+- [x] Property-based safety proofs and an agent evaluation suite
+- [ ] Ingredient-level macro grounding (USDA has poor Indian-food coverage,
+      so this likely needs a curated table rather than a single API)
 - [ ] Google Fit / Fitbit OAuth for passive sensing
 - [ ] Weekly email digests
 - [ ] Multi-agent split: nutritionist + trainer + critic

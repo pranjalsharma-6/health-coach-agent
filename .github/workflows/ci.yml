@@ -26,17 +26,20 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements-dev.txt
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          # Test-only: an in-memory Mongo and an ASGI client, so CI needs no
-          # database server and no API keys.
-          pip install mongomock_motor
+        # Dev file pulls in requirements.txt plus the test-only extras, so CI
+        # needs no database server and no API keys.
+        run: pip install -r requirements-dev.txt
 
       - name: Run tests
         run: python -m pytest -q
+
+      - name: Agent evaluation suite
+        # Prints the full decision/validator report. The same checks run under
+        # pytest above; this step makes the numbers visible in the CI log.
+        run: python -m evals.run
 
   frontend:
     name: Frontend typecheck, lint and build

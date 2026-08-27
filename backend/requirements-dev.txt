@@ -1,0 +1,17 @@
+# Development and test dependencies.
+#
+# Kept out of requirements.txt so the production image ships only what the API
+# needs at runtime.
+#
+#   pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest==8.3.4
+pytest-asyncio==0.25.2
+
+# Property-based testing over the nutrition engine's whole input space.
+hypothesis==6.165.10
+
+# In-memory Mongo, so the API tests need no database server.
+mongomock_motor==0.0.36
