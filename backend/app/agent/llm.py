@@ -216,7 +216,68 @@ def get_structured_llm(schema: Any) -> Any:
     validator in `validators.py` is the second, because schema-valid output can
     still be nutritionally wrong or violate the user's diet.
     """
-    return get_llm(budget_for(schema)).with_structured_output(schema)
+    llm = get_llm(budget_for(schema))
+
+    if settings.llm_structured_method == "json_mode":
+        return _JsonModeAdapter(
+            llm.with_structured_output(schema, method="json_mode"), schema
+        )
+
+    return llm.with_structured_output(schema)
+
+
+class _JsonModeAdapter:
+    """Appends the schema to the prompt on the json_mode path.
+
+    Under `function_calling` the provider is handed the schema and constrains
+    the output to it. Under `json_mode` it only promises valid JSON, so the
+    shape has to be in the prompt — otherwise the model returns well-formed
+    JSON of entirely the wrong shape and the parse fails downstream, which
+    looks like a model problem rather than a missing instruction.
+
+    Wrapping it here rather than at each call site means no caller has to
+    remember, and switching methods stays a config change.
+    """
+
+    def __init__(self, runnable: Any, schema: Any):
+        self._runnable = runnable
+        self._instruction = build_json_mode_instruction(schema)
+
+    async def ainvoke(self, messages: Any) -> Any:
+        return await self._runnable.ainvoke(self._with_schema(messages))
+
+    def _with_schema(self, messages: Any) -> Any:
+        if isinstance(messages, str):
+            return messages + self._instruction
+
+        if not isinstance(messages, list) or not messages:
+            return messages
+
+        # Append to the final message rather than adding another: some
+        # providers require the last message to be the user turn.
+        last = messages[-1]
+        content = getattr(last, "content", None)
+        if not isinstance(content, str):
+            return messages
+
+        amended = last.model_copy(update={"content": content + self._instruction})
+        return [*messages[:-1], amended]
+
+
+def build_json_mode_instruction(schema: Any) -> str:
+    """The schema, as prompt text, for the json_mode path.
+
+    Under `function_calling` the provider constrains the output to the schema.
+    Under `json_mode` it only guarantees valid JSON, so the shape has to be
+    stated in the prompt or the model has no way to know it.
+    """
+    import json
+
+    return (
+        "\n\nReturn a single JSON object and nothing else — no prose, no "
+        "markdown fences. It must match this JSON Schema exactly:\n\n"
+        + json.dumps(schema.model_json_schema(), indent=2)
+    )
 
 
 def is_configured() -> bool:

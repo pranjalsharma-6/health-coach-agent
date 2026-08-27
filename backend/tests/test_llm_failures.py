@@ -547,3 +547,76 @@ class TestReasoningEffortSetting:
                 Settings(_env_file=None)
         finally:
             os.environ.pop("LLM_REASONING_EFFORT", None)
+
+
+class TestJsonModeEscapeHatch:
+    """`tool_use_failed` is a tool-calling failure specifically.
+
+    json_mode asks for raw JSON instead, so it sidesteps the mechanism that is
+    failing. The provider then only guarantees valid JSON, not the right shape,
+    so the schema has to travel in the prompt.
+    """
+
+    @staticmethod
+    def _adapter(schema):
+        import app.agent.llm as llm_module
+
+        class Captor:
+            sent = None
+
+            async def ainvoke(self, messages):
+                Captor.sent = messages
+                return "parsed"
+
+        captor = Captor()
+        return llm_module._JsonModeAdapter(captor, schema), Captor
+
+    async def test_the_schema_is_appended_to_the_prompt(self):
+        from langchain_core.messages import HumanMessage
+
+        from app.models.plan import TrainingPlanDraft
+
+        adapter, captor = self._adapter(TrainingPlanDraft)
+        await adapter.ainvoke([HumanMessage(content="Plan a week.")])
+
+        sent = captor.sent[-1].content
+        assert "Plan a week." in sent, "the original prompt must survive"
+        assert "activity_type" in sent, "the schema must reach the model"
+
+    async def test_the_original_message_is_not_mutated(self):
+        """The caller's message object is reused across retries."""
+        from langchain_core.messages import HumanMessage
+
+        from app.models.plan import TrainingPlanDraft
+
+        original = HumanMessage(content="Plan a week.")
+        adapter, _ = self._adapter(TrainingPlanDraft)
+        await adapter.ainvoke([original])
+
+        assert original.content == "Plan a week."
+
+    async def test_a_plain_string_prompt_also_works(self):
+        from app.models.plan import TrainingPlanDraft
+
+        adapter, captor = self._adapter(TrainingPlanDraft)
+        await adapter.ainvoke("Plan a week.")
+
+        assert "Plan a week." in captor.sent
+        assert "activity_type" in captor.sent
+
+    def test_an_unknown_method_is_rejected_at_startup(self):
+        import os
+
+        from app.core.config import Settings
+
+        os.environ["LLM_STRUCTURED_METHOD"] = "telepathy"
+        try:
+            with pytest.raises(Exception, match="function_calling or json_mode"):
+                Settings(_env_file=None)
+        finally:
+            os.environ.pop("LLM_STRUCTURED_METHOD", None)
+
+    def test_the_default_is_function_calling(self):
+        from app.core.config import Settings
+
+        assert Settings(_env_file=None).llm_structured_method == "function_calling"

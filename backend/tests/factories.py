@@ -184,7 +184,7 @@ def make_meal_draft(
     targets: NutritionTargets, days: int = 7, meals_per_day: int = 4
 ) -> "MealPlanDraft":
     """The nutritionist's half of a well-formed plan."""
-    from app.models.plan import DayMeals, MealPlanDraft
+    from app.models.plan import DayMeals, MealDraftItem, MealPlanDraft
 
     return MealPlanDraft(
         plan_title="Week 1: Protein First",
@@ -194,7 +194,13 @@ def make_meal_draft(
             "to keep prep under 30 minutes."
         ),
         days=[
-            DayMeals(day=d, meals=make_day(d, targets, meals_per_day).meals)
+            DayMeals(
+                day=d,
+                meals=[
+                    MealDraftItem.from_meal_item(m)
+                    for m in make_day(d, targets, meals_per_day).meals
+                ],
+            )
             for d in range(1, days + 1)
         ],
     )

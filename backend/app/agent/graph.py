@@ -472,7 +472,9 @@ async def assemble_node(state: AgentState) -> Dict[str, Any]:
         DailyPlan(
             day=day.day,
             theme=day.theme,
-            meals=day.meals,
+            # Widen the draft items to stored meals, assigning ids in code
+            # rather than asking the model to invent them.
+            meals=day.to_meal_items(),
             # A missing day becomes rest rather than an exception: half a plan
             # the user can follow beats none at all.
             activity=by_day.get(day.day, fallback),

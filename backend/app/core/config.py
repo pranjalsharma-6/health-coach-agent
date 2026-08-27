@@ -43,6 +43,21 @@ class Settings(BaseSettings):
     # tight rate limit that can consume the whole budget, leaving nothing for
     # the structured result. Sent to the provider only when set.
     llm_reasoning_effort: Optional[str] = Field(default=None)
+    # How structured output is requested. `function_calling` is the default and
+    # works on most providers; `json_mode` asks for raw JSON instead, which is
+    # the escape hatch when a model keeps failing to emit a tool call.
+    llm_structured_method: str = Field(default="function_calling")
+
+    @field_validator("llm_structured_method", mode="before")
+    @classmethod
+    def _check_method(cls, v):
+        if isinstance(v, str):
+            v = v.strip().lower() or "function_calling"
+            if v not in {"function_calling", "json_mode"}:
+                raise ValueError(
+                    "LLM_STRUCTURED_METHOD must be function_calling or json_mode"
+                )
+        return v
 
     @field_validator("llm_reasoning_effort", mode="before")
     @classmethod

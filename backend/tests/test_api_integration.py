@@ -513,6 +513,7 @@ def _stub_llm(monkeypatch, *plans: HealthPlan) -> None:
     from app.models.plan import (
         DayMeals,
         DayTraining,
+        MealDraftItem,
         MealPlanDraft,
         PlanCritique,
         TrainingPlanDraft,
@@ -523,7 +524,11 @@ def _stub_llm(monkeypatch, *plans: HealthPlan) -> None:
             plan_title=plan.plan_title,
             reasoning=plan.agent_reasoning,
             days=[
-                DayMeals(day=d.day, theme=d.theme, meals=d.meals)
+                DayMeals(
+                    day=d.day,
+                    theme=d.theme,
+                    meals=[MealDraftItem.from_meal_item(m) for m in d.meals],
+                )
                 for d in plan.daily_plans
             ],
         )

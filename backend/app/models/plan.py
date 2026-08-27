@@ -203,6 +203,63 @@ class HealthPlan(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+class MealDraftItem(BaseModel):
+    """One meal, as the nutritionist is asked to produce it.
+
+    Deliberately narrower than `MealItem`. That model also carries `recipe`
+    (generated lazily, per meal, on demand), and `status` / `logged_at`, which
+    are runtime state set when the user logs a meal. None of the three are the
+    planner's to invent, and every field in a structured-output schema is
+    something the model has to reason about and the provider has to constrain.
+
+    Dropping them, and `meal_id` — a deterministic string that code can build
+    more reliably than a model can — takes the schema from 1142 tokens to a
+    fraction of that. Small structured outputs are the reliable ones; the meal
+    schema was the one place that principle was not being applied.
+    """
+
+    meal_type: MealType
+    name: str = Field(description="Short dish name, e.g. 'Masala oats with peanuts'.")
+    description: str = Field(
+        description="One sentence on what it is and why it fits the user's goal."
+    )
+    calories_kcal: int = Field(description="Estimated calories for this meal.")
+    protein_g: int = Field(description="Estimated protein in grams.")
+    carbs_g: int = Field(description="Estimated carbohydrate in grams.")
+    fat_g: int = Field(description="Estimated fat in grams.")
+
+    @classmethod
+    def from_meal_item(cls, meal: "MealItem") -> "MealDraftItem":
+        """Narrow a stored meal back to its draft form.
+
+        The inverse of `to_meal_item`, for anything that needs to hand an
+        existing plan back to the nutritionist's schema.
+        """
+        return cls(
+            meal_type=meal.meal_type,
+            name=meal.name,
+            description=meal.description,
+            calories_kcal=meal.calories_kcal,
+            protein_g=meal.protein_g,
+            carbs_g=meal.carbs_g,
+            fat_g=meal.fat_g,
+        )
+
+    def to_meal_item(self, day: int) -> "MealItem":
+        """Widen to the stored model, assigning the id here rather than asking
+        the model for one."""
+        return MealItem(
+            meal_id=f"d{day}-{MealType(self.meal_type).value}",
+            meal_type=self.meal_type,
+            name=self.name,
+            description=self.description,
+            calories_kcal=self.calories_kcal,
+            protein_g=self.protein_g,
+            carbs_g=self.carbs_g,
+            fat_g=self.fat_g,
+        )
+
+
 class DayMeals(BaseModel):
     """One day's meals, without the training."""
 
@@ -210,7 +267,11 @@ class DayMeals(BaseModel):
     theme: Optional[str] = Field(
         default=None, description="Optional short theme, e.g. 'High protein, low prep'."
     )
-    meals: List[MealItem]
+    meals: List[MealDraftItem]
+
+    def to_meal_items(self) -> List["MealItem"]:
+        """The stored form of this day's meals, with ids assigned."""
+        return [meal.to_meal_item(self.day) for meal in self.meals]
 
 
 class MealPlanDraft(BaseModel):
