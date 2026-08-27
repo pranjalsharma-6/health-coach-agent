@@ -74,8 +74,9 @@ class TestSessionProblems:
     LEVEL = Level.BEGINNER
 
     def test_a_balanced_session_is_accepted(self):
+        """Bodyweight only, because that is the default style."""
         assert find_problems(
-            ["Push-ups", "Dumbbell row", "Goblet squat", "Plank"], self.LEVEL
+            ["Push-ups", "Inverted row", "Bodyweight squat", "Plank"], self.LEVEL
         ) == []
 
     def test_an_invented_exercise_is_rejected(self):
@@ -84,9 +85,19 @@ class TestSessionProblems:
         problems = find_problems(["Turbo shoulder blaster"], self.LEVEL)
         assert any("not in the exercise table" in p for p in problems)
 
-    def test_equipment_the_user_may_not_have_is_rejected(self):
+    def test_a_style_the_user_did_not_choose_is_rejected(self):
+        """A barbell squat for someone training in a bedroom."""
         problems = find_problems(["Barbell back squat"], self.LEVEL)
-        assert any("barbell" in p for p in problems)
+        assert any("full_gym" in p for p in problems)
+
+    def test_the_same_movement_is_fine_for_someone_with_a_gym(self):
+        """The old code excluded barbells outright, so a gym member was handed
+        push-ups. Choosing full_gym is what unlocks them."""
+        from app.models.enums import TrainingStyle
+
+        assert find_problems(
+            ["Barbell back squat"], Level.INTERMEDIATE, [TrainingStyle.FULL_GYM]
+        ) == []
 
     def test_an_exercise_above_the_users_level_is_rejected(self):
         problems = find_problems(["Ab wheel rollout"], self.LEVEL)
@@ -221,8 +232,8 @@ class TestFormCueFallback:
                     ExercisePrescription(
                         name="Push-ups", sets=3, reps="8-12", cue=cue
                     ),
-                    ExercisePrescription(name="Dumbbell row", sets=3, reps="10"),
-                    ExercisePrescription(name="Goblet squat", sets=3, reps="12"),
+                    ExercisePrescription(name="Inverted row", sets=3, reps="10"),
+                    ExercisePrescription(name="Bodyweight squat", sets=3, reps="12"),
                 ]
 
         def factory(schema):
@@ -302,3 +313,164 @@ class TestFormCueFallback:
         session = next(d.activity for d in plan.daily_plans if d.activity.exercises)
         pushups = next(e for e in session.exercises if e.name == "Push-ups")
         assert pushups.cue == "Go slower than usual today."
+
+
+class TestTrainingStyles:
+    """The user says how they train; the system stops guessing.
+
+    Before this, `ASSUMED_EQUIPMENT` hardcoded bodyweight, dumbbells and bands
+    for everybody. That was wrong in both directions: a gym member was handed
+    push-ups because barbells were excluded outright, and someone with nothing
+    was assumed to own dumbbells.
+    """
+
+    def test_a_gym_member_gets_barbell_work(self):
+        from app.models.enums import TrainingStyle
+
+        names = {
+            e.name for e in allowed_for(Level.INTERMEDIATE, [TrainingStyle.FULL_GYM])
+        }
+        assert "Barbell back squat" in names
+        assert "Barbell deadlift" in names
+
+    def test_a_gym_member_keeps_bodyweight_work(self):
+        """A rack does not stop push-ups working. A gym is a superset of a
+        bedroom, not an alternative to it."""
+        from app.models.enums import TrainingStyle
+
+        names = {
+            e.name for e in allowed_for(Level.BEGINNER, [TrainingStyle.FULL_GYM])
+        }
+        assert "Push-ups" in names
+        assert "Bodyweight squat" in names
+
+    def test_bodyweight_only_excludes_equipment(self):
+        from app.models.enums import TrainingStyle
+
+        for exercise in allowed_for(Level.ADVANCED, [TrainingStyle.BODYWEIGHT]):
+            assert exercise.equipment in (Equipment.NONE, Equipment.BAND), (
+                f"{exercise.name} needs {exercise.equipment.value}"
+            )
+
+    def test_a_swimmer_gets_swimming(self):
+        from app.models.enums import TrainingStyle
+
+        names = {
+            e.name for e in allowed_for(Level.BEGINNER, [TrainingStyle.SWIMMING])
+        }
+        assert any("swim" in n.lower() for n in names)
+
+    def test_a_swimmer_is_not_told_to_run(self):
+        """Both need no equipment, so equipment alone cannot separate them —
+        which is why the style overrides exist."""
+        from app.models.enums import TrainingStyle
+
+        names = {
+            e.name for e in allowed_for(Level.BEGINNER, [TrainingStyle.SWIMMING])
+        }
+        assert "Easy jog" not in names
+        assert "Interval sprints" not in names
+
+    def test_a_runner_is_not_told_to_swim(self):
+        from app.models.enums import TrainingStyle
+
+        names = {
+            e.name
+            for e in allowed_for(Level.BEGINNER, [TrainingStyle.RUNNING_CYCLING])
+        }
+        assert not any("swim" in n.lower() for n in names)
+
+    def test_mobility_is_available_to_everyone(self):
+        """Nobody needs anything for it, and everybody benefits."""
+        from app.models.enums import TrainingStyle
+
+        for style in TrainingStyle:
+            names = {e.name for e in allowed_for(Level.BEGINNER, [style])}
+            assert any(
+                n in names for n in ("Cat-cow", "Hip flexor stretch", "Sun salutations")
+            ), f"{style.value} has no mobility work"
+
+    def test_every_style_yields_a_usable_number_of_exercises(self):
+        """A style that produces two options cannot fill a week."""
+        from app.models.enums import TrainingStyle
+
+        for style in TrainingStyle:
+            count = len(allowed_for(Level.BEGINNER, [style]))
+            assert count >= 6, f"{style.value} offers only {count} exercises"
+
+    def test_styles_combine(self):
+        from app.models.enums import TrainingStyle
+
+        gym = {e.name for e in allowed_for(Level.BEGINNER, [TrainingStyle.FULL_GYM])}
+        swim = {e.name for e in allowed_for(Level.BEGINNER, [TrainingStyle.SWIMMING])}
+        both = {
+            e.name
+            for e in allowed_for(
+                Level.BEGINNER, [TrainingStyle.FULL_GYM, TrainingStyle.SWIMMING]
+            )
+        }
+        assert both == gym | swim
+
+    def test_no_choice_falls_back_to_bodyweight(self):
+        """An old profile, or someone who skipped the question, still gets a
+        plan they can do — not an empty one."""
+        assert allowed_for(Level.BEGINNER, []) == allowed_for(Level.BEGINNER, None)
+        assert len(allowed_for(Level.BEGINNER, [])) >= 6
+
+    def test_the_prompt_names_the_chosen_styles(self):
+        from app.models.enums import TrainingStyle
+
+        profile = make_profile()
+        profile.training_styles = [TrainingStyle.SWIMMING]
+        block = build_exercise_block(profile)
+
+        assert "Swimming" in block
+        assert "Barbell back squat" not in block
+
+    def test_the_prompt_asks_for_mobility_days_anyway(self):
+        """A week of nothing but hard swims is how people get hurt. The
+        exception has to be stated, not applied silently."""
+        from app.agent.prompts import build_trainer_prompt
+        from app.models.enums import AgentDecision, TrainingStyle
+
+        profile = make_profile()
+        profile.training_styles = [TrainingStyle.SWIMMING]
+        prompt = build_trainer_prompt(profile, AgentDecision.STRUCTURAL_REPLAN)
+
+        assert "mobility" in prompt.lower()
+        assert "say so" in prompt.lower()
+
+
+class TestStyleValidation:
+    def test_a_plan_using_an_unchosen_style_is_rejected(self):
+        from app.models.enums import DietType, TrainingStyle
+
+        targets = make_targets()
+        profile = make_profile(diet_type=DietType.VEGETARIAN)
+        profile.training_styles = [TrainingStyle.BODYWEIGHT]
+        plan = make_health_plan(targets)
+        plan.daily_plans[0].activity.exercises = [
+            ExercisePrescription(name="Barbell deadlift", sets=3, reps="5")
+        ]
+
+        result = validate_plan(plan, profile, targets)
+        assert not result.is_valid
+
+    def test_the_same_plan_passes_for_a_gym_user(self):
+        from app.models.enums import ActivityLevel, DietType, TrainingStyle
+
+        targets = make_targets()
+        profile = make_profile(
+            diet_type=DietType.VEGETARIAN, activity_level=ActivityLevel.VERY_ACTIVE
+        )
+        profile.training_styles = [TrainingStyle.FULL_GYM]
+        plan = make_health_plan(targets)
+        for day in plan.daily_plans:
+            if day.activity.exercises:
+                day.activity.exercises = [
+                    ExercisePrescription(name="Barbell deadlift", sets=3, reps="5"),
+                    ExercisePrescription(name="Barbell bench press", sets=3, reps="6-8"),
+                    ExercisePrescription(name="Lat pulldown", sets=3, reps="10"),
+                ]
+
+        assert validate_plan(plan, profile, targets).is_valid

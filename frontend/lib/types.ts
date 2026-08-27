@@ -77,6 +77,7 @@ export interface Profile {
   target_timeline_weeks: number;
   diet_type: DietType;
   cuisine_preferences: Cuisine[];
+  training_styles: TrainingStyle[];
   allergies: string[];
   disliked_foods: string[];
   meals_per_day: number;
@@ -147,6 +148,14 @@ export interface Meal {
   status: MealStatus;
   logged_at: string | null;
 }
+
+export type TrainingStyle =
+  | "bodyweight"
+  | "dumbbells"
+  | "full_gym"
+  | "running_cycling"
+  | "swimming"
+  | "yoga_mobility";
 
 export interface ExercisePrescription {
   name: string;

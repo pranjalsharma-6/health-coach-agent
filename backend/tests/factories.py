@@ -79,16 +79,18 @@ def make_meal(
     )
 
 
-# A valid beginner session: four patterns, all bodyweight or dumbbell, all in
-# the exercise table. Shared so a change to the training rules shows up as one
-# failing fixture rather than twenty.
+# A valid beginner session: four patterns, no equipment at all, every movement
+# in the table. Equipment-free on purpose — bodyweight is the default training
+# style, so this fixture stays valid for a profile that made no choices.
 def make_exercises() -> list:
     from app.models.plan import ExercisePrescription
 
     return [
         ExercisePrescription(name="Push-ups", sets=3, reps="8-12", rest_seconds=90),
-        ExercisePrescription(name="Dumbbell row", sets=3, reps="10", rest_seconds=90),
-        ExercisePrescription(name="Goblet squat", sets=3, reps="10-15", rest_seconds=90),
+        ExercisePrescription(name="Inverted row", sets=3, reps="8-12", rest_seconds=90),
+        ExercisePrescription(
+            name="Bodyweight squat", sets=3, reps="12-20", rest_seconds=90
+        ),
         ExercisePrescription(name="Plank", sets=3, reps="30 seconds", rest_seconds=60),
     ]
 

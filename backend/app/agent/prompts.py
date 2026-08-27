@@ -559,17 +559,21 @@ def build_exercise_block(profile: ProfileInDB) -> str:
     a model handed a list picks from movements that exist, at a difficulty the
     user can perform, with a form cue already written.
     """
+    from app.models.enums import TrainingStyle
     from app.services.exercises import Pattern, allowed_for
 
     level = training_level_for(profile)
-    available = allowed_for(level)
+    styles = [TrainingStyle(s) for s in (profile.training_styles or [])]
+    available = allowed_for(level, styles)
+
+    chosen = ", ".join(s.label for s in styles) or "bodyweight"
 
     lines = [
         "## EXERCISE LIST — choose only from these, by exact name",
         "",
-        f"Selected for a {level.value} trainee using bodyweight, dumbbells or "
-        "bands. Anything not on this list is unavailable, however well it would "
-        "fit.",
+        f"The user trains this way: **{chosen}**. Selected for a {level.value} "
+        "trainee. Anything not on this list is unavailable, however well it "
+        "would fit.",
         "",
     ]
 
@@ -641,6 +645,10 @@ def build_trainer_prompt(
 - 3 to 5 exercises for a strength session; 1 to 2 for a cardio or mobility day.
 - A strength session of three or more movements must train more than one
   pattern — do not build a session entirely out of pushes.
+- Keep one or two easy mobility days in the week even when the user picked a
+  single style, and say so in the day's description. A week of nothing but
+  hard sessions is how people get hurt and stop. Naming the exception is the
+  point: silently ignoring what they asked for is worse than explaining it.
 - Leave `cue` empty unless you have something to add. The list's own cue is
   used by default and is more reliable than a generated one.
 - `reasoning` is two to three sentences on the shape of the week: the split, the

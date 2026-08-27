@@ -23,7 +23,9 @@ They are starting points, not prescriptions for a competitive athlete.
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, FrozenSet, List, Optional, Sequence
+
+from app.models.enums import TrainingStyle
 
 
 class Pattern(str, Enum):
@@ -242,13 +244,86 @@ EXERCISES: List[Exercise] = [
     Exercise("Thoracic rotations", Pattern.MOBILITY, Equipment.NONE, Level.BEGINNER,
              "Rotate from the upper back, keeping your hips still.", default_sets=1,
              default_reps="8 each side", default_rest_seconds=0),
+    Exercise("Sun salutations", Pattern.MOBILITY, Equipment.NONE, Level.BEGINNER,
+             "One breath per movement; don't rush the transitions.", default_sets=3,
+             default_reps="5 rounds", default_rest_seconds=30),
+    Exercise("Downward dog hold", Pattern.MOBILITY, Equipment.NONE, Level.BEGINNER,
+             "Bend your knees freely — a long spine matters more than straight legs.",
+             default_sets=3, default_reps="30 seconds", default_rest_seconds=30),
+    Exercise("Pigeon pose", Pattern.MOBILITY, Equipment.NONE, Level.INTERMEDIATE,
+             "Keep your hips square; prop the near hip on a cushion if it lifts.",
+             default_sets=1, default_reps="60 seconds each side", default_rest_seconds=0),
+
+    # --- Swimming ---
+    Exercise("Easy swim — freestyle", Pattern.CARDIO, Equipment.NONE, Level.BEGINNER,
+             "Breathe every third stroke to keep your stroke even on both sides.",
+             default_sets=1, default_reps="20-30 minutes", default_rest_seconds=0),
+    Exercise("Swim intervals", Pattern.CARDIO, Equipment.NONE, Level.INTERMEDIATE,
+             "Hold the same pace across every rep; start slower than feels right.",
+             default_sets=8, default_reps="50 metres", default_rest_seconds=45),
+    Exercise("Kickboard drill", Pattern.CARDIO, Equipment.NONE, Level.BEGINNER,
+             "Kick from the hip, not the knee, with a small steady flutter.",
+             default_sets=4, default_reps="50 metres", default_rest_seconds=45),
+    Exercise("Pull buoy drill", Pattern.CARDIO, Equipment.NONE, Level.INTERMEDIATE,
+             "Buoy between the thighs so your legs rest and your arms do the work.",
+             default_sets=4, default_reps="50 metres", default_rest_seconds=45),
 ]
 
 BY_NAME: Dict[str, Exercise] = {e.name.lower(): e for e in EXERCISES}
 
-# Equipment a user can be assumed to reach without being asked. Onboarding does
-# not currently ask, so anything beyond this is a guess about someone's life.
-ASSUMED_EQUIPMENT = {Equipment.NONE, Equipment.DUMBBELL, Equipment.BAND}
+# Exercises whose style cannot be read off equipment alone. A jog and a swim
+# both need no equipment, but someone who chose "swimming" did not ask to run.
+_STYLE_OVERRIDES: Dict[str, FrozenSet[TrainingStyle]] = {
+    "easy jog": frozenset({TrainingStyle.RUNNING_CYCLING}),
+    "cycling": frozenset({TrainingStyle.RUNNING_CYCLING}),
+    "interval sprints": frozenset({TrainingStyle.RUNNING_CYCLING}),
+    "easy swim — freestyle": frozenset({TrainingStyle.SWIMMING}),
+    "swim intervals": frozenset({TrainingStyle.SWIMMING}),
+    "kickboard drill": frozenset({TrainingStyle.SWIMMING}),
+    "pull buoy drill": frozenset({TrainingStyle.SWIMMING}),
+}
+
+# What a gym gives you that a bedroom does not.
+_GYM_ONLY = {Equipment.BARBELL, Equipment.MACHINE, Equipment.PULL_UP_BAR}
+
+_HOME_STRENGTH = frozenset(
+    {TrainingStyle.BODYWEIGHT, TrainingStyle.DUMBBELLS, TrainingStyle.FULL_GYM}
+)
+
+
+def styles_of(exercise: Exercise) -> FrozenSet[TrainingStyle]:
+    """Which training styles this exercise belongs to.
+
+    Derived from pattern and equipment, with overrides where the two do not
+    settle it. A gym membership is a superset of a bedroom: somebody with a
+    rack can still do push-ups, so bodyweight work stays available to them.
+    """
+    override = _STYLE_OVERRIDES.get(exercise.name.lower())
+    if override is not None:
+        return override
+
+    if exercise.pattern is Pattern.MOBILITY:
+        # Mobility is universal — everyone benefits, nobody needs anything.
+        return frozenset(TrainingStyle)
+
+    if exercise.equipment in _GYM_ONLY:
+        return frozenset({TrainingStyle.FULL_GYM})
+
+    if exercise.equipment is Equipment.DUMBBELL:
+        return frozenset({TrainingStyle.DUMBBELLS, TrainingStyle.FULL_GYM})
+
+    if exercise.equipment is Equipment.BAND:
+        return _HOME_STRENGTH
+
+    if exercise.pattern is Pattern.CARDIO:
+        # Walking, skipping, stairs: no facility required, so nobody is
+        # excluded from them whatever else they picked.
+        return frozenset(TrainingStyle)
+
+    return _HOME_STRENGTH
+
+
+DEFAULT_STYLES: List[TrainingStyle] = [TrainingStyle.BODYWEIGHT]
 
 STRENGTH_PATTERNS = {
     Pattern.PUSH,
@@ -265,26 +340,28 @@ def find(name: str) -> Optional[Exercise]:
     return BY_NAME.get(name.strip().lower())
 
 
-def allowed_for(level: Level, equipment: Optional[Sequence[Equipment]] = None) -> List[Exercise]:
-    """Exercises a user at this level can do with this equipment.
+def allowed_for(
+    level: Level, styles: Optional[Sequence[TrainingStyle]] = None
+) -> List[Exercise]:
+    """Exercises this user can do, at this level, in the styles they chose.
 
     Levels are cumulative: an intermediate keeps every beginner movement. The
     basics do not stop working because someone got stronger.
     """
     ranks = {Level.BEGINNER: 0, Level.INTERMEDIATE: 1, Level.ADVANCED: 2}
     ceiling = ranks[level]
-    available = set(equipment) if equipment is not None else ASSUMED_EQUIPMENT
+    chosen = {TrainingStyle(s) for s in (styles or DEFAULT_STYLES)}
 
     return [
         e for e in EXERCISES
-        if ranks[e.level] <= ceiling and e.equipment in available
+        if ranks[e.level] <= ceiling and (styles_of(e) & chosen)
     ]
 
 
 def find_problems(
     exercise_names: Sequence[str],
     level: Level,
-    equipment: Optional[Sequence[Equipment]] = None,
+    styles: Optional[Sequence[TrainingStyle]] = None,
 ) -> List[str]:
     """What is wrong with this session, if anything.
 
@@ -293,7 +370,7 @@ def find_problems(
     to argue about, safety and feasibility are not.
     """
     problems: List[str] = []
-    available = set(equipment) if equipment is not None else ASSUMED_EQUIPMENT
+    chosen = {TrainingStyle(s) for s in (styles or DEFAULT_STYLES)}
     ranks = {Level.BEGINNER: 0, Level.INTERMEDIATE: 1, Level.ADVANCED: 2}
 
     known: List[Exercise] = []
@@ -307,10 +384,12 @@ def find_problems(
             continue
         known.append(exercise)
 
-        if exercise.equipment not in available:
+        exercise_styles = styles_of(exercise)
+        if not (exercise_styles & chosen):
+            wanted = ", ".join(sorted(s.value for s in exercise_styles))
             problems.append(
-                f"'{exercise.name}' needs {exercise.equipment.value}, which the "
-                "user has not said they have."
+                f"'{exercise.name}' belongs to {wanted}, which the user did not "
+                "choose."
             )
 
         if ranks[exercise.level] > ranks[level]:

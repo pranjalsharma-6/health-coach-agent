@@ -104,6 +104,38 @@ class Gender(str, Enum):
     OTHER = "other"
 
 
+class TrainingStyle(str, Enum):
+    """How the user actually likes to train, and what they can reach.
+
+    One list rather than separate "equipment" and "modality" questions.
+    Technically those are different axes, but users do not experience them
+    that way — "I swim" already says there is a pool — and two questions is
+    twice the onboarding friction for a distinction nobody feels.
+
+    This replaces a hardcoded guess that everyone had bodyweight, dumbbells
+    and bands: too little for someone with a gym membership, and an
+    assumption about a hostel room it was never told about.
+    """
+
+    BODYWEIGHT = "bodyweight"           # nothing needed
+    DUMBBELLS = "dumbbells"             # some weights at home
+    FULL_GYM = "full_gym"               # barbells, machines, racks
+    RUNNING_CYCLING = "running_cycling"
+    SWIMMING = "swimming"
+    YOGA_MOBILITY = "yoga_mobility"
+
+    @property
+    def label(self) -> str:
+        return {
+            TrainingStyle.BODYWEIGHT: "Bodyweight at home",
+            TrainingStyle.DUMBBELLS: "Dumbbells at home",
+            TrainingStyle.FULL_GYM: "Full gym",
+            TrainingStyle.RUNNING_CYCLING: "Running / cycling",
+            TrainingStyle.SWIMMING: "Swimming",
+            TrainingStyle.YOGA_MOBILITY: "Yoga & mobility",
+        }[self]
+
+
 class CookingSkill(str, Enum):
     BEGINNER = "beginner"
     INTERMEDIATE = "intermediate"

@@ -9,6 +9,8 @@ import { useRequireAuth, useAuth } from "@/lib/auth";
 import {
   ACTIVITY_DESCRIPTIONS,
   ACTIVITY_LABELS,
+  TRAINING_STYLE_DESCRIPTIONS,
+  TRAINING_STYLE_LABELS,
   BUDGET_LABELS,
   CUISINE_LABELS,
   DIET_DESCRIPTIONS,
@@ -25,6 +27,7 @@ import type {
   BudgetTier,
   CookingSkill,
   Cuisine,
+  TrainingStyle,
   DietType,
   Gender,
   Goal,
@@ -48,6 +51,7 @@ const DEFAULT_DRAFT: ProfileDraft = {
   target_weight_kg: 65,
   goal: "fat_loss",
   activity_level: "moderately_active",
+  training_styles: ["bodyweight"],
   target_timeline_weeks: 12,
   diet_type: "vegetarian",
   cuisine_preferences: ["north_indian"],
@@ -82,6 +86,26 @@ export default function OnboardingPage() {
    * means anyway. Choosing anything else then clears Mixed, since "mixed plus
    * South Indian" is not a coherent instruction.
    */
+  /** Add or remove one training style, keeping at least one selected.
+   *
+   * Deselecting the last one falls back to bodyweight rather than leaving the
+   * trainer nothing to choose from. Bodyweight is the honest default: it needs
+   * no equipment, so it excludes nobody.
+   */
+  function toggleTrainingStyle(style: TrainingStyle) {
+    setDraft((prev) => {
+      const selected = prev.training_styles;
+      const remaining = selected.includes(style)
+        ? selected.filter((s) => s !== style)
+        : [...selected, style];
+
+      return {
+        ...prev,
+        training_styles: remaining.length ? remaining : ["bodyweight"],
+      };
+    });
+  }
+
   function toggleCuisine(cuisine: Cuisine) {
     setDraft((prev) => {
       const selected = prev.cuisine_preferences;
@@ -309,6 +333,27 @@ export default function OnboardingPage() {
                     />
                   ),
                 )}
+              </div>
+
+              <div className="mt-7">
+                <Field
+                  label="How do you like to train?"
+                  hint="Pick as many as you like. Kaya only prescribes movements you can actually do — nothing here assumes a gym you don't have."
+                >
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    {(Object.keys(TRAINING_STYLE_LABELS) as TrainingStyle[]).map(
+                      (style) => (
+                        <ChoiceCard
+                          key={style}
+                          selected={draft.training_styles.includes(style)}
+                          onSelect={() => toggleTrainingStyle(style)}
+                          title={TRAINING_STYLE_LABELS[style]}
+                          description={TRAINING_STYLE_DESCRIPTIONS[style]}
+                        />
+                      ),
+                    )}
+                  </div>
+                </Field>
               </div>
             </StepShell>
           )}

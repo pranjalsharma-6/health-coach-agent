@@ -24,6 +24,7 @@ from app.models.enums import (
     DietType,
     Gender,
     Goal,
+    TrainingStyle,
 )
 
 
@@ -52,6 +53,25 @@ def _coerce_cuisines(value: Any) -> Any:
 CuisineList = Annotated[List[Cuisine], BeforeValidator(_coerce_cuisines)]
 
 
+def _coerce_styles(value: Any) -> Any:
+    """Same shape as cuisines: a bare value becomes a list, empty means default.
+
+    An empty selection is not an error — it means "no preference" — and
+    bodyweight is the honest default because it needs nothing and excludes
+    nobody.
+    """
+    if value is None:
+        return value
+    if isinstance(value, (str, TrainingStyle)):
+        return [value]
+    if isinstance(value, list) and not value:
+        return [TrainingStyle.BODYWEIGHT]
+    return value
+
+
+TrainingStyleList = Annotated[List[TrainingStyle], BeforeValidator(_coerce_styles)]
+
+
 class ProfileBase(BaseModel):
     # --- Body ---
     gender: Gender
@@ -63,6 +83,11 @@ class ProfileBase(BaseModel):
     # --- Goal ---
     goal: Goal
     activity_level: ActivityLevel = ActivityLevel.MODERATELY_ACTIVE
+    # What the trainer may prescribe from. Defaults to bodyweight so a profile
+    # written before this existed still plans something the user can do.
+    training_styles: TrainingStyleList = Field(
+        default_factory=lambda: [TrainingStyle.BODYWEIGHT]
+    )
     target_timeline_weeks: int = Field(default=12, ge=4, le=52)
 
     # --- Diet (the adherence levers) ---
@@ -119,6 +144,7 @@ class ProfileUpdate(BaseModel):
     target_weight_kg: Optional[float] = Field(default=None, ge=30, le=300)
     goal: Optional[Goal] = None
     activity_level: Optional[ActivityLevel] = None
+    training_styles: Optional[TrainingStyleList] = None
     target_timeline_weeks: Optional[int] = Field(default=None, ge=4, le=52)
     diet_type: Optional[DietType] = None
     cuisine_preferences: Optional[CuisineList] = Field(

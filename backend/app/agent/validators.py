@@ -312,7 +312,9 @@ def _check_training_session(
         return
 
     problems = find_problems(
-        [e.name for e in activity.exercises], training_level_for(profile)
+        [e.name for e in activity.exercises],
+        training_level_for(profile),
+        profile.training_styles,
     )
     for problem in problems:
         result.errors.append(f"Day {day.day}: {problem}")

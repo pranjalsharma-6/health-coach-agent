@@ -15,6 +15,7 @@ import type {
   DietType,
   Goal,
   MealType,
+  TrainingStyle,
 } from "./types";
 
 export const DIET_LABELS: Record<DietType, string> = {
@@ -75,6 +76,24 @@ export const CUISINE_LABELS: Record<Cuisine, string> = {
   east_asian: "East Asian",
   mediterranean: "Mediterranean",
   mixed: "A bit of everything",
+};
+
+export const TRAINING_STYLE_LABELS: Record<TrainingStyle, string> = {
+  bodyweight: "Bodyweight at home",
+  dumbbells: "Dumbbells at home",
+  full_gym: "Full gym",
+  running_cycling: "Running / cycling",
+  swimming: "Swimming",
+  yoga_mobility: "Yoga & mobility",
+};
+
+export const TRAINING_STYLE_DESCRIPTIONS: Record<TrainingStyle, string> = {
+  bodyweight: "No equipment at all.",
+  dumbbells: "A pair of dumbbells or resistance bands.",
+  full_gym: "Barbells, racks and machines.",
+  running_cycling: "Outdoors, on foot or on a bike.",
+  swimming: "Pool access.",
+  yoga_mobility: "Flexibility and recovery work.",
 };
 
 export const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
