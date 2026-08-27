@@ -1,6 +1,6 @@
 # Kaya — An Autonomous Nutrition Coach That Replans When Life Happens
 
-> *Kaya* (काय) — Sanskrit for "body."
+> *Kaya* (काया) — "body," in Sanskrit and Hindi.
 
 ---
 

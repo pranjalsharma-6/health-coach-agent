@@ -131,7 +131,7 @@ export default function LandingPage() {
 
       <footer className="border-t border-line">
         <div className="max-w-6xl mx-auto px-6 py-8 text-sm text-ink-muted flex flex-col sm:flex-row gap-2 justify-between">
-          <p>Kaya — काय, Sanskrit for &ldquo;body&rdquo;.</p>
+          <p>Kaya — काया, &ldquo;body&rdquo; in Sanskrit and Hindi.</p>
           <p>Built with FastAPI, LangGraph and Next.js.</p>
         </div>
       </footer>

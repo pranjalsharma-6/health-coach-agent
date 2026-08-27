@@ -1,6 +1,6 @@
 # Kaya — an autonomous nutrition coach that replans when life happens
 
-> *Kaya* (काय) — Sanskrit for "body."
+> *Kaya* (काया) — "body," in Sanskrit and Hindi.
 
 **Every nutrition app is a logging app. Kaya is a planning agent.**
 

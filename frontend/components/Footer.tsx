@@ -32,7 +32,7 @@ export function Footer() {
 
         <div className="flex items-center gap-4 order-1 sm:order-2">
           <span className="text-xs text-ink-muted tracking-wide">
-            काय · body
+            काया · body
           </span>
           <ThemeToggle />
         </div>
