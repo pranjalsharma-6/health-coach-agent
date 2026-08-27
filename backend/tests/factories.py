@@ -284,3 +284,28 @@ def make_critique(approved: bool = True, issues=None) -> "PlanCritique":
             else "The week needs a few adjustments before it's ready."
         ),
     )
+
+
+def scope_to_requested_days(draft, messages):
+    """Trim a meal draft to the day range the prompt asked for.
+
+    The nutritionist drafts the week in chunks, so a stub that returns all
+    seven days for every chunk stitches into a fourteen-day plan and hides
+    whatever the test was actually checking. Real models return what they were
+    asked for; stubs should too.
+    """
+    import re
+
+    text = (
+        messages
+        if isinstance(messages, str)
+        else "\n".join(str(getattr(m, "content", m)) for m in messages)
+    )
+    match = re.search(r"DAYS (\d+) TO (\d+) ONLY", text)
+    if not match:
+        return draft
+
+    first, last = int(match.group(1)), int(match.group(2))
+    return draft.model_copy(
+        update={"days": [d for d in draft.days if first <= d.day <= last]}
+    )

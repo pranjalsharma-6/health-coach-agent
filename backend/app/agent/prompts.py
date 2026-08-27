@@ -729,3 +729,33 @@ def _build_user_block(profile: ProfileInDB) -> str:
         f"{profile.current_weight_kg}kg (BMI {profile.bmi})\n"
         f"- Goal: {profile.goal}{target}"
     )
+
+
+def build_non_negotiables(profile: ProfileInDB) -> str:
+    """The constraints that outrank any feedback, restated at the end.
+
+    Appended after critique or validation feedback rather than relying on the
+    copy at the top of the prompt. A reviewer asking for variety is a
+    suggestion; the diet type is not, and a revision that satisfies the
+    reviewer by breaking the diet is worse than no revision at all.
+    """
+    diet = DietType(profile.diet_type)
+
+    lines = [
+        "## THESE OVERRIDE EVERYTHING ABOVE",
+        "",
+        f"1. **Diet — {diet.label}.** {_DIET_RULES[diet]} No feedback, however "
+        "reasonable, justifies breaking this.",
+        f"2. **Exactly {profile.meals_per_day} meals on every single day.** "
+        "Count them before you answer.",
+        "3. **Only the days you were asked for**, numbered exactly as "
+        "instructed. Not fewer, not more.",
+    ]
+
+    if profile.allergies:
+        lines.append(
+            f"4. **Allergies — must not appear anywhere:** "
+            f"{', '.join(profile.allergies)}"
+        )
+
+    return "\n".join(lines)

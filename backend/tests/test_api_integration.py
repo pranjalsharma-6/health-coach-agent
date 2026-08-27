@@ -5,6 +5,8 @@ serialisation — without needing a database server or an LLM. The agent's LLM
 call is stubbed; everything around it is real.
 """
 
+import re
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from mongomock_motor import AsyncMongoMockClient
@@ -12,7 +14,11 @@ from mongomock_motor import AsyncMongoMockClient
 from app.db import mongo
 from app.main import app
 from app.models.plan import HealthPlan
-from tests.factories import make_health_plan, make_targets
+from tests.factories import (
+    make_health_plan,
+    make_targets,
+    scope_to_requested_days,
+)
 
 BASE = "/api/v1"
 
@@ -563,20 +569,37 @@ def _stub_llm(monkeypatch, *plans: HealthPlan) -> None:
             for d in plans[0].daily_plans
         ],
     )
+    def _requested_days(messages):
+        text = "\n".join(str(getattr(m, "content", m)) for m in messages)
+        match = re.search(r"DAYS (\d+) TO (\d+) ONLY", text)
+        return (int(match.group(1)), int(match.group(2))) if match else None
+
     approving_critic = PlanCritique(
         approved=True, issues=[], summary="The week is coherent."
     )
+
+    # The nutritionist drafts the week in chunks, so one generation round is
+    # several calls. The queue has to advance once per round, not once per
+    # call, or a "reject the first plan, accept the second" test silently
+    # consumes both plans on its first attempt.
+    current: dict = {"draft": None}
 
     class StubStructuredLLM:
         def __init__(self, schema):
             self._schema = schema
 
-        async def ainvoke(self, _messages):
+        async def ainvoke(self, messages):
             if self._schema is TrainingPlanDraft:
                 return training
             if self._schema is PlanCritique:
                 return approving_critic
-            return meal_queue.pop(0) if len(meal_queue) > 1 else meal_queue[0]
+
+            window = _requested_days(messages)
+            if window is None or window[0] == 1:
+                current["draft"] = (
+                    meal_queue.pop(0) if len(meal_queue) > 1 else meal_queue[0]
+                )
+            return scope_to_requested_days(current["draft"], messages)
 
     monkeypatch.setattr(
         "app.agent.graph.get_structured_llm", lambda schema: StubStructuredLLM(schema)

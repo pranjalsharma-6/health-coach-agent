@@ -40,9 +40,10 @@ while `validate` is deterministic and has the final say. A model that approves
 an unsafe plan must not be able to make it safe.
 """
 
+import asyncio
 import time
 from datetime import date
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
@@ -60,6 +61,7 @@ from app.agent.prompts import (
     TRAINER_SYSTEM_PROMPT,
     build_critic_prompt,
     build_critique_feedback,
+    build_non_negotiables,
     build_nutritionist_prompt,
     build_recipe_correction,
     build_recipe_prompt,
@@ -81,6 +83,7 @@ from app.models.plan import (
     ActivityItem,
     DailyPlan,
     HealthPlan,
+    DayMeals,
     MealPlanDraft,
     PlanCritique,
     PlanInDB,
@@ -294,6 +297,71 @@ async def start_generation_node(state: AgentState) -> Dict[str, Any]:
     return {"attempt": state.get("attempt", 0) + 1}
 
 
+# Days per request. Seven days of four meals is 28 nested objects, and models
+# lose count over that distance: the observed failures were a two-day week, a
+# day with three meals, and an egg in a vegetarian plan — all consistency
+# errors across a long output rather than errors of judgement.
+#
+# The codebase already argues that small structured outputs are the reliable
+# ones; that is why the specialists were split in the first place. This applies
+# the same reasoning one level down.
+MEAL_CHUNK_DAYS = 4
+
+
+def meal_chunk_count() -> int:
+    """How many requests one meal draft takes. Used by tests."""
+    return len(_chunk_ranges(PLAN_DURATION_DAYS, MEAL_CHUNK_DAYS))
+
+
+def _chunk_ranges(total: int, size: int) -> List[Tuple[int, int]]:
+    """[(1, 4), (5, 7)] for a seven-day week in chunks of four."""
+    return [
+        (start + 1, min(start + size, total))
+        for start in range(0, total, size)
+    ]
+
+
+async def _draft_meals_in_chunks(prompt: str) -> MealPlanDraft:
+    """Draft the week in day ranges, concurrently, and stitch the result.
+
+    Concurrent rather than sequential because they are independent — the same
+    reason the two specialists fan out — so the week still costs one call's
+    latency rather than two.
+
+    The title and reasoning come from the first chunk. Asking each chunk for
+    its own and then picking one wastes tokens on text that gets discarded.
+    """
+    ranges = _chunk_ranges(PLAN_DURATION_DAYS, MEAL_CHUNK_DAYS)
+
+    async def draft_range(first: int, last: int) -> MealPlanDraft:
+        scoped = (
+            f"{prompt}\n\n---\n\n"
+            f"## THIS REQUEST: DAYS {first} TO {last} ONLY\n\n"
+            f"Return exactly {last - first + 1} days, numbered {first} to "
+            f"{last}. Do not include any other day. The rest of the week is "
+            "being planned separately, so do not reference it."
+        )
+        return await get_structured_llm(MealPlanDraft).ainvoke(
+            [
+                SystemMessage(content=NUTRITIONIST_SYSTEM_PROMPT),
+                HumanMessage(content=scoped),
+            ]
+        )
+
+    drafts = await asyncio.gather(*(draft_range(a, b) for a, b in ranges))
+
+    days: List[DayMeals] = []
+    for draft in drafts:
+        days.extend(draft.days)
+    days.sort(key=lambda d: d.day)
+
+    return MealPlanDraft(
+        plan_title=drafts[0].plan_title,
+        reasoning=drafts[0].reasoning,
+        days=days,
+    )
+
+
 async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
     """The nutritionist: the food half of the week."""
     if state.get("error"):
@@ -316,18 +384,25 @@ async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
         trigger_detail=state.get("trigger_detail", ""),
         duration_days=PLAN_DURATION_DAYS,
     )
-    for extra in (state.get("retry_feedback"), state.get("critique_feedback")):
-        if extra:
-            prompt += "\n\n---\n\n" + extra
+    feedback = [
+        extra
+        for extra in (state.get("retry_feedback"), state.get("critique_feedback"))
+        if extra
+    ]
+    for extra in feedback:
+        prompt += "\n\n---\n\n" + extra
+
+    if feedback:
+        # Restate the non-negotiables *after* the feedback. Models weight the
+        # end of a prompt heavily, and the observed failure was exactly this:
+        # the reviewer asked for more variety, and the next draft answered with
+        # eggs in a vegetarian plan. The constraints were in the prompt — they
+        # were just no longer the last thing read.
+        prompt += "\n\n---\n\n" + build_non_negotiables(profile)
 
     try:
         started = time.perf_counter()
-        draft: MealPlanDraft = await get_structured_llm(MealPlanDraft).ainvoke(
-            [
-                SystemMessage(content=NUTRITIONIST_SYSTEM_PROMPT),
-                HumanMessage(content=prompt),
-            ]
-        )
+        draft = await _draft_meals_in_chunks(prompt)
         return {
             "meal_draft": draft,
             "steps": [

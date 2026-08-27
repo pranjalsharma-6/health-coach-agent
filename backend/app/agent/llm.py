@@ -23,11 +23,15 @@ logger = get_logger(__name__)
 # all, and every call came back 413. These are sized to what each schema
 # actually produces — a training week is seven activities, not a novel.
 MAX_OUTPUT_TOKENS: Dict[str, int] = {
-    # The meal budget also has to cover a reasoning model's thinking tokens,
-    # which are spent before the answer begins. Sized to the largest value the
-    # fan-out can afford against an 8000 TPM tier, not to the answer alone.
-    "MealPlanDraft": 4400,      # 7 days x ~4 meals, each with macros
-    "TrainingPlanDraft": 1600,  # 7 days x a session of named exercises
+    # Per *call*, not per week. The nutritionist drafts the week in chunks, so
+    # this covers one chunk — and the chunks run concurrently, which means both
+    # reservations land in the same rate-limit window and have to be budgeted
+    # together. Leaving this at a whole week's worth reserved 8800 output
+    # tokens against an 8000 TPM tier and brought back the 413 it was raised to
+    # avoid. It also has to cover a reasoning model's thinking tokens, which
+    # are spent before the answer begins.
+    "MealPlanDraft": 1800,      # ~4 days x 4 meals, each with macros
+    "TrainingPlanDraft": 1400,  # 7 days x a session of named exercises
     "PlanCritique": 700,        # a verdict and a short list of issues
     "Recipe": 1200,             # ingredients, steps, tips for one meal
 }

@@ -215,13 +215,14 @@ class TestFormCueFallback:
         from app.agent import graph
         from app.models.enums import DietType
         from app.models.plan import ExerciseDraft, PlanCritique, TrainingPlanDraft
-        from tests.factories import (
+        from tests.factories import (  # noqa: F811
             make_critique,
             make_log,
             make_meal_draft,
             make_profile,
             make_targets,
             make_training_draft,
+            scope_to_requested_days,
         )
 
         targets = make_targets()
@@ -236,12 +237,14 @@ class TestFormCueFallback:
 
         def factory(schema):
             class Stub:
-                async def ainvoke(self, _messages):
+                async def ainvoke(self, messages):
                     if schema is TrainingPlanDraft:
                         return training
                     if schema is PlanCritique:
                         return make_critique()
-                    return make_meal_draft(targets)
+                    return scope_to_requested_days(
+                        make_meal_draft(targets), messages
+                    )
 
             return Stub()
 

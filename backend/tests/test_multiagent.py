@@ -7,6 +7,7 @@ compiles.
 """
 
 import asyncio
+import re
 from datetime import date
 
 import pytest
@@ -43,6 +44,12 @@ class Recorder:
         self.meal_prompts: list[str] = []
         self.training_prompts: list[str] = []
 
+    @staticmethod
+    def _requested_days(text: str) -> tuple[int, int] | None:
+        """The day range this call asked for, if it is a chunked request."""
+        match = re.search(r"DAYS (\d+) TO (\d+) ONLY", text)
+        return (int(match.group(1)), int(match.group(2))) if match else None
+
     def factory(self, schema):
         recorder = self
 
@@ -69,10 +76,24 @@ class Recorder:
                     return recorder.training
                 if schema is PlanCritique:
                     return recorder.critique
-                return (
+                draft = (
                     recorder.meals.pop(0)
                     if len(recorder.meals) > 1
                     else recorder.meals[0]
+                )
+
+                # A real model returns only the days it was asked for. Returning
+                # the whole week per chunk would stitch into a fourteen-day plan
+                # and hide whatever the test is actually checking.
+                window = recorder._requested_days(text)
+                if window is None:
+                    return draft
+
+                first, last = window
+                return draft.model_copy(
+                    update={
+                        "days": [d for d in draft.days if first <= d.day <= last]
+                    }
                 )
 
         return Stub()
@@ -201,7 +222,9 @@ class TestSelectiveRetry:
         final = await graph.run_agent("u1", today=TODAY)
 
         assert final["saved_plan"] is not None
-        assert recorder.calls.count("MealPlanDraft") == 2, "meals should be redrawn"
+        assert recorder.calls.count("MealPlanDraft") == 2 * graph.meal_chunk_count(), (
+            "meals should be redrawn"
+        )
         assert recorder.calls.count("TrainingPlanDraft") == 1, (
             "training should be reused, not regenerated"
         )
@@ -218,7 +241,9 @@ class TestSelectiveRetry:
         assert final["saved_plan"] is None
         assert final["error"] is not None
         assert "unchanged" in final["error"]
-        assert recorder.calls.count("MealPlanDraft") == graph.MAX_GENERATION_ATTEMPTS
+        assert recorder.calls.count("MealPlanDraft") == (
+            graph.MAX_GENERATION_ATTEMPTS * graph.meal_chunk_count()
+        )
 
 
 class TestCritic:
@@ -235,7 +260,9 @@ class TestCritic:
 
         final = await graph.run_agent("u1", today=TODAY)
 
-        assert recorder.calls.count("MealPlanDraft") == 2, "meals should be revised"
+        assert recorder.calls.count("MealPlanDraft") == 2 * graph.meal_chunk_count(), (
+            "meals should be revised"
+        )
         assert final["saved_plan"] is not None, "a revised plan should still ship"
 
     async def test_critic_only_gets_one_round(self, wired, monkeypatch):
@@ -257,7 +284,7 @@ class TestCritic:
 
         await graph.run_agent("u1", today=TODAY)
 
-        assert issue in recorder.meal_prompts[1], (
+        assert any(issue in p for p in recorder.meal_prompts), (
             "the revision prompt must name what the reviewer objected to"
         )
 
@@ -371,3 +398,124 @@ class TestNoActionPath:
 
         assert final["decision"] == AgentDecision.NO_ACTION
         assert recorder.calls == [], "no LLM should be called when nothing is wrong"
+
+
+class TestChunkedMealDrafting:
+    """The week is drafted in day ranges rather than all at once.
+
+    Seven days of four meals is 28 nested objects, and models lose count over
+    that distance. The observed run produced, in order: a two-day week, a day
+    with three meals, and an egg in a vegetarian plan — consistency failures
+    across a long output, not errors of judgement. The codebase already argues
+    that small structured outputs are the reliable ones; this applies it one
+    level down from the specialist split.
+    """
+
+    def test_the_week_is_covered_exactly_once(self):
+        ranges = graph._chunk_ranges(graph.PLAN_DURATION_DAYS, graph.MEAL_CHUNK_DAYS)
+        covered = [day for first, last in ranges for day in range(first, last + 1)]
+
+        assert covered == list(range(1, graph.PLAN_DURATION_DAYS + 1)), (
+            "chunks must tile the week with no gap and no overlap"
+        )
+
+    def test_more_than_one_chunk(self):
+        """A single chunk would be the behaviour this replaces."""
+        assert graph.meal_chunk_count() > 1
+
+    def test_no_chunk_is_longer_than_the_limit(self):
+        for first, last in graph._chunk_ranges(
+            graph.PLAN_DURATION_DAYS, graph.MEAL_CHUNK_DAYS
+        ):
+            assert last - first + 1 <= graph.MEAL_CHUNK_DAYS
+
+    @pytest.mark.parametrize(
+        "total,size,expected",
+        [
+            (7, 4, [(1, 4), (5, 7)]),
+            (7, 3, [(1, 3), (4, 6), (7, 7)]),
+            (4, 4, [(1, 4)]),
+            (1, 4, [(1, 1)]),
+        ],
+    )
+    def test_range_arithmetic(self, total, size, expected):
+        assert graph._chunk_ranges(total, size) == expected
+
+    async def test_each_chunk_is_told_which_days_to_return(self, wired, monkeypatch):
+        recorder = Recorder()
+        monkeypatch.setattr(graph, "get_structured_llm", recorder.factory)
+
+        await graph.run_agent("u1", today=TODAY)
+
+        windows = [recorder._requested_days(p) for p in recorder.meal_prompts]
+        assert all(w is not None for w in windows), (
+            "every meal call must name its day range"
+        )
+        assert sorted(windows) == graph._chunk_ranges(
+            graph.PLAN_DURATION_DAYS, graph.MEAL_CHUNK_DAYS
+        )
+
+    async def test_the_chunks_stitch_into_one_full_week(self, wired, monkeypatch):
+        recorder = Recorder()
+        monkeypatch.setattr(graph, "get_structured_llm", recorder.factory)
+
+        final = await graph.run_agent("u1", today=TODAY)
+        plan = final["saved_plan"]
+
+        assert plan is not None
+        assert [d.day for d in plan.daily_plans] == list(
+            range(1, graph.PLAN_DURATION_DAYS + 1)
+        )
+
+    async def test_the_chunks_run_concurrently(self, wired, monkeypatch):
+        """Sequential chunks would double the wait for the same week."""
+        recorder = Recorder(delay=0.15)
+        monkeypatch.setattr(graph, "get_structured_llm", recorder.factory)
+
+        await graph.run_agent("u1", today=TODAY)
+
+        meal_starts = [t for name, t in recorder.started if name == "MealPlanDraft"]
+        meal_ends = [t for name, t in recorder.finished if name == "MealPlanDraft"]
+
+        assert len(meal_starts) == graph.meal_chunk_count()
+        assert max(meal_starts) < min(meal_ends), (
+            "the second chunk started only after the first finished"
+        )
+
+
+class TestFeedbackCannotBreakTheDiet:
+    """Constraints are restated after any feedback.
+
+    The reviewer asked for more variety and the next draft answered with eggs
+    in a vegetarian plan. The diet rules were in the prompt — they had just
+    stopped being the last thing the model read.
+    """
+
+    async def test_the_non_negotiables_follow_the_critique(
+        self, wired, monkeypatch
+    ):
+        recorder = Recorder(
+            critique=make_critique(
+                approved=False, issues=["The same meals repeat every day."]
+            )
+        )
+        monkeypatch.setattr(graph, "get_structured_llm", recorder.factory)
+
+        await graph.run_agent("u1", today=TODAY)
+
+        revision = next(
+            p for p in recorder.meal_prompts if "repeat every day" in p
+        )
+        assert "THESE OVERRIDE EVERYTHING ABOVE" in revision
+        assert revision.index("repeat every day") < revision.index(
+            "THESE OVERRIDE EVERYTHING ABOVE"
+        ), "the constraints must come after the feedback, not before it"
+
+    async def test_a_first_attempt_has_no_such_section(self, wired, monkeypatch):
+        """Nothing to override when there is no feedback."""
+        recorder = Recorder()
+        monkeypatch.setattr(graph, "get_structured_llm", recorder.factory)
+
+        await graph.run_agent("u1", today=TODAY)
+
+        assert "THESE OVERRIDE EVERYTHING ABOVE" not in recorder.meal_prompts[0]

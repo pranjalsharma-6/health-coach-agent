@@ -148,7 +148,8 @@ class TestNonRetryableFailures:
 
         await graph.run_agent("u1", today=TODAY)
 
-        assert len(calls) == 2, (
+        expected = graph.meal_chunk_count() + 1  # meal chunks + the trainer
+        assert len(calls) == expected, (
             f"expected one attempt from each specialist, got {len(calls)} calls "
             "— a config error is being retried"
         )
@@ -189,13 +190,17 @@ class TestRetryableFailuresStillRetry:
     async def test_a_transient_failure_can_recover(self, wired, monkeypatch):
         """First call fails, second succeeds — the plan should still ship."""
         from app.models.plan import MealPlanDraft, PlanCritique, TrainingPlanDraft
-        from tests.factories import make_critique, make_training_draft
+        from tests.factories import (
+            make_critique,
+            make_training_draft,
+            scope_to_requested_days,
+        )
 
         state = {"meal_calls": 0}
 
         def factory(schema):
             class Stub:
-                async def ainvoke(self, _messages):
+                async def ainvoke(self, messages):
                     if schema is TrainingPlanDraft:
                         return make_training_draft()
                     if schema is PlanCritique:
@@ -203,7 +208,9 @@ class TestRetryableFailuresStillRetry:
                     state["meal_calls"] += 1
                     if state["meal_calls"] == 1:
                         raise ProviderError("upstream hiccup", 503)
-                    return make_meal_draft(TARGETS)
+                    return scope_to_requested_days(
+                        make_meal_draft(TARGETS), messages
+                    )
 
             return Stub()
 
@@ -212,7 +219,9 @@ class TestRetryableFailuresStillRetry:
         final = await graph.run_agent("u1", today=TODAY)
 
         assert final["saved_plan"] is not None, "a transient error should recover"
-        assert state["meal_calls"] == 2
+        # A failure in one chunk re-runs the whole round, so two full sets
+        # of chunk calls: the first (one of which raised) and the retry.
+        assert state["meal_calls"] == 2 * graph.meal_chunk_count()
 
 
 class TestModelListFilter:
@@ -320,14 +329,20 @@ class TestOutputBudgets:
     TRAINER_PROMPT = 700
 
     def test_the_concurrent_fan_out_fits_the_free_tier(self):
-        """Both specialists run in one superstep, so their reservations land in
-        the same rate-limit window and have to be budgeted together."""
+        """Everything in one superstep shares a rate-limit window.
+
+        Both specialists run together, and the nutritionist is itself several
+        concurrent chunk calls — each reserving the meal budget and each
+        carrying a full copy of the prompt. Counting one meal call here is what
+        let two chunks reserve 8800 tokens against an 8000 limit.
+        """
+        from app.agent import graph
         from app.agent.llm import budget_for
         from app.models.plan import MealPlanDraft, TrainingPlanDraft
 
+        chunks = graph.meal_chunk_count()
         total = (
-            self.NUTRITIONIST_PROMPT
-            + budget_for(MealPlanDraft)
+            chunks * (self.NUTRITIONIST_PROMPT + budget_for(MealPlanDraft))
             + self.TRAINER_PROMPT
             + budget_for(TrainingPlanDraft)
         )
