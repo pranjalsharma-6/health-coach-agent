@@ -17,13 +17,13 @@ type ButtonSize = "sm" | "md" | "lg";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-brand-600 text-white hover:bg-brand-700 focus-visible:outline-brand-600 shadow-sm",
+    "bg-brand-600 text-white hover:bg-brand-700 focus-visible:outline-brand-600 shadow-soft hover:shadow-raised hover:-translate-y-px",
   secondary:
     "bg-card text-ink border border-line hover:bg-raised focus-visible:outline-brand-600",
   ghost:
     "bg-transparent text-ink-soft hover:bg-raised hover:text-ink focus-visible:outline-brand-600",
   danger:
-    "bg-clay-600 text-white hover:bg-clay-700 focus-visible:outline-clay-600 shadow-sm",
+    "bg-clay-600 text-white hover:bg-clay-700 focus-visible:outline-clay-600 shadow-soft hover:shadow-raised hover:-translate-y-px",
 };
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
@@ -108,7 +108,7 @@ export function Card({
   return (
     <Tag
       className={cn(
-        "bg-card border border-line rounded-2xl shadow-sm",
+        "bg-card border border-line rounded-card shadow-soft",
         className,
       )}
     >
@@ -182,7 +182,7 @@ export function Input({
     <input
       {...props}
       className={cn(
-        "w-full px-3.5 py-2.5 rounded-xl bg-card border border-line text-ink",
+        "w-full px-3.5 py-2.5 rounded-xl bg-card border border-line text-ink shadow-[inset_0_1px_2px_rgb(43_56_48_/_0.03)]",
         "placeholder:text-ink-muted",
         "focus:outline-2 focus:outline-offset-0 focus:outline-brand-500 focus:border-brand-500",
         "transition-colors",
@@ -217,11 +217,11 @@ export function ChoiceCard({
       onClick={onSelect}
       aria-pressed={selected}
       className={cn(
-        "text-left p-4 rounded-xl border-2 transition-all w-full",
+        "text-left p-4 rounded-2xl border transition-all w-full",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
         selected
-          ? "border-brand-500 bg-brand-50 dark:bg-brand-950 shadow-sm"
-          : "border-line bg-card hover:border-brand-300 hover:bg-raised",
+          ? "border-brand-400 bg-brand-50 dark:bg-brand-950 shadow-soft ring-1 ring-brand-400"
+          : "border-line bg-card hover:border-brand-300 hover:bg-raised hover:shadow-soft",
         className,
       )}
     >
@@ -286,7 +286,7 @@ export function Alert({
   };
 
   return (
-    <div className={cn("rounded-xl border px-4 py-3 text-sm", tones[tone])}>
+    <div className={cn("rounded-2xl border px-4 py-3 text-sm", tones[tone])}>
       {title && <p className="font-semibold mb-0.5">{title}</p>}
       <div>{children}</div>
     </div>

@@ -60,6 +60,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check palette contrast
+        # Pastels are where accessibility quietly breaks — a colour soft enough
+        # to look calm as a fill is often too light to carry text. This fails
+        # the build rather than shipping an unreadable label.
+        run: python3 scripts/check-palette.py
+
       - name: Typecheck
         run: npx tsc --noEmit
 

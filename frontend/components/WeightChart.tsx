@@ -8,7 +8,7 @@
  * (2px stroke, 8px end marker with a surface ring, hairline recessive grid)
  * under direct control.
  *
- * Series colour is `#38855c` (Kaya brand-500) in both themes — it clears the
+ * Series colour is `#5d9174` (Kaya brand-500) in both themes — it clears the
  * lightness band, chroma floor and 3:1 contrast against the light card (#ffffff)
  * and the dark card (#1c1a16). The deeper brand-600 reads gray (chroma 0.089)
  * and was rejected.
@@ -23,7 +23,7 @@ import { useMemo, useState } from "react";
 import { EmptyState, cn } from "@/components/ui";
 import type { WeightPoint } from "@/lib/types";
 
-const SERIES = "#38855c";
+const SERIES = "#5d9174";
 
 // viewBox units, sized to the sidebar column it lives in (~380px) so the 11px
 // axis text renders at roughly its nominal size instead of being scaled down to

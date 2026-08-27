@@ -9,56 +9,76 @@
 --------------------------------------------------------------------------- */
 
 @theme {
-  /* Brand — deep forest green */
-  --color-brand-50: #f0f7f2;
-  --color-brand-100: #dceee2;
-  --color-brand-200: #bcddc8;
-  --color-brand-300: #8ec3a4;
-  --color-brand-400: #5aa279;
-  --color-brand-500: #38855c;
-  --color-brand-600: #276b48;
-  --color-brand-700: #1f553a;
-  --color-brand-800: #1b4430;
-  --color-brand-900: #173829;
-  --color-brand-950: #0b1f17;
+  /* Brand — soft sage. Pastel enough to sit calmly on a page, with the deeper
+     stops kept dark enough to carry text: the usual pastel failure is a colour
+     that looks lovely as a fill and is illegible as a label. */
+  --color-brand-50: #f3f8f4;
+  --color-brand-100: #e4efe8;
+  --color-brand-200: #c8dfd1;
+  --color-brand-300: #a4c9b3;
+  --color-brand-400: #7cad90;
+  --color-brand-500: #5d9174;
+  --color-brand-600: #46785d;
+  --color-brand-700: #375f4a;
+  --color-brand-800: #2c4b3b;
+  --color-brand-900: #243d31;
+  --color-brand-950: #131f1a;
 
-  /* Accent — terracotta, for actions that need warmth */
-  --color-clay-50: #fdf5f2;
-  --color-clay-100: #fbeae2;
-  --color-clay-200: #f7d3c3;
-  --color-clay-300: #f0b39b;
-  --color-clay-400: #e58a67;
-  --color-clay-500: #d96a44;
-  --color-clay-600: #c65130;
-  --color-clay-700: #a53f28;
-  --color-clay-800: #863626;
-  --color-clay-900: #6e3022;
+  /* Blush — muted terracotta. Warnings and destructive actions. */
+  --color-clay-50: #fdf6f3;
+  --color-clay-100: #fbe9e3;
+  --color-clay-200: #f6d4c8;
+  --color-clay-300: #eeb5a3;
+  --color-clay-400: #e29379;
+  --color-clay-500: #d1755a;
+  --color-clay-600: #b55940;
+  --color-clay-700: #934634;
+  --color-clay-800: #79392c;
+  --color-clay-900: #653228;
 
-  /* Turmeric — highlights, streaks, protein */
-  --color-spice-100: #fdf0d5;
-  --color-spice-200: #f9dfa6;
-  --color-spice-300: #f2c66c;
-  --color-spice-400: #e9ab3c;
-  --color-spice-500: #d9911f;
-  --color-spice-600: #b97317;
+  /* Butter — soft turmeric. Highlights, streaks, protein. */
+  --color-spice-100: #fdf3dc;
+  --color-spice-200: #f9e4b3;
+  --color-spice-300: #f2cf82;
+  --color-spice-400: #e5b155;
+  --color-spice-500: #c9902f;
+  --color-spice-600: #8a6015;
 
-  /* Neutrals — warm-tinted, not pure grey */
-  --color-sand-50: #faf9f6;
-  --color-sand-100: #f4f2ec;
-  --color-sand-200: #e8e4d9;
-  --color-sand-300: #d5cfbf;
-  --color-sand-400: #b0a894;
+  /* Neutrals — warm paper, never grey. A cool neutral under a warm accent is
+     what makes a palette read as generic. */
+  --color-sand-50: #fbf9f5;
+  --color-sand-100: #f5f2ea;
+  --color-sand-200: #eae5da;
+  --color-sand-300: #d9d2c3;
+  --color-sand-400: #b4ac99;
   --color-sand-500: #8a8272;
-  --color-sand-600: #6b6456;
-  --color-sand-700: #524d43;
-  --color-sand-800: #3a3630;
-  --color-sand-900: #262320;
-  --color-sand-950: #171513;
+  --color-sand-600: #6a6355;
+  --color-sand-700: #514b40;
+  --color-sand-800: #39352d;
+  --color-sand-900: #26231e;
+  --color-sand-950: #17150f;
+
+  /* Explicit light/dark surface values, named so the palette checker can read
+     both themes out of this file rather than guessing. */
+  --color-page-light: #fbf9f5;
+  --color-card-light: #ffffff;
+  --color-ink-light: #2b3830;
+  --color-ink-soft-light: #5b6660;
+  --color-ink-muted-light: #6d776f;
+
+  --color-page-dark: #151816;
+  --color-card-dark: #1e2320;
+  --color-ink-dark: #eef0ec;
+  --color-ink-soft-dark: #a9b3ac;
+  --color-ink-muted-dark: #8b958e;
+
+  /* One series colour, legible on both card colours. */
+  --color-chart-series: #5d9174;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-fraunces), Georgia, serif;
 
-  --radius-card: 1rem;
+  --radius-card: 1.25rem;
 }
 
 /* --------------------------------------------------------------------------
@@ -67,35 +87,44 @@
 -------------------------------------------------------------------------- */
 
 :root {
-  --surface-page: var(--color-sand-50);
-  --surface-card: #ffffff;
+  --surface-page: var(--color-page-light);
+  --surface-card: var(--color-card-light);
   --surface-raised: var(--color-sand-100);
   --surface-border: var(--color-sand-200);
-  --text-primary: var(--color-sand-900);
-  --text-secondary: var(--color-sand-600);
-  --text-muted: var(--color-sand-500);
+  --text-primary: var(--color-ink-light);
+  --text-secondary: var(--color-ink-soft-light);
+  --text-muted: var(--color-ink-muted-light);
+
+  /* Soft, warm-tinted shadows. A neutral grey shadow on a warm surface reads
+     as dirt; tinting it toward the ink keeps it looking like light. */
+  --shadow-card: 0 1px 2px rgb(43 56 48 / 0.04), 0 4px 16px rgb(43 56 48 / 0.05);
+  --shadow-lift: 0 2px 4px rgb(43 56 48 / 0.05), 0 12px 28px rgb(43 56 48 / 0.09);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --surface-page: #14120f;
-    --surface-card: #1c1a16;
-    --surface-raised: #24211c;
-    --surface-border: #322e27;
-    --text-primary: var(--color-sand-100);
-    --text-secondary: var(--color-sand-400);
-    --text-muted: var(--color-sand-500);
+    --surface-page: var(--color-page-dark);
+    --surface-card: var(--color-card-dark);
+    --surface-raised: #272d29;
+    --surface-border: #303733;
+    --text-primary: var(--color-ink-dark);
+    --text-secondary: var(--color-ink-soft-dark);
+    --text-muted: var(--color-ink-muted-dark);
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.24);
+    --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.34), 0 12px 28px rgb(0 0 0 / 0.4);
   }
 }
 
 :root[data-theme="dark"] {
-  --surface-page: #14120f;
-  --surface-card: #1c1a16;
-  --surface-raised: #24211c;
-  --surface-border: #322e27;
-  --text-primary: var(--color-sand-100);
-  --text-secondary: var(--color-sand-400);
-  --text-muted: var(--color-sand-500);
+  --surface-page: var(--color-page-dark);
+  --surface-card: var(--color-card-dark);
+  --surface-raised: #272d29;
+  --surface-border: #303733;
+  --text-primary: var(--color-ink-dark);
+  --text-secondary: var(--color-ink-soft-dark);
+  --text-muted: var(--color-ink-muted-dark);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.24);
+  --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.34), 0 12px 28px rgb(0 0 0 / 0.4);
 }
 
 @theme inline {
@@ -106,6 +135,9 @@
   --color-ink: var(--text-primary);
   --color-ink-soft: var(--text-secondary);
   --color-ink-muted: var(--text-muted);
+
+  --shadow-soft: var(--shadow-card);
+  --shadow-raised: var(--shadow-lift);
 }
 
 * {
@@ -117,6 +149,16 @@ body {
   color: var(--text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  /* Slightly open tracking on the body copy. Inter set solid at default
+     tracking is the single most recognisable "generated app" tell. */
+  letter-spacing: 0.005em;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.018em;
 }
 
 /* --------------------------------------------------------------------------
