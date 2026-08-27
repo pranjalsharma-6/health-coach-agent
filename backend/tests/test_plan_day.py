@@ -70,3 +70,54 @@ class TestPlanDayIsPublished:
             recent_logs=[],
         )
         assert snapshot.plan_day is None
+
+
+class TestPlanLength:
+    """A short week used to pass every structural check.
+
+    The numbering rule asked whether day numbers were sequential, and [1, 2]
+    is. So a run that reported "Drafted 2 days of meals" would have shipped a
+    two-day plan as a seven-day one, and the dashboard would have wrapped
+    around to day 1 on Wednesday.
+    """
+
+    @staticmethod
+    def _plan_and_profile(days):
+        from app.models.enums import DietType
+        from tests.factories import make_health_plan, make_profile, make_targets
+
+        targets = make_targets()
+        return (
+            make_health_plan(targets, days=days),
+            make_profile(diet_type=DietType.VEGETARIAN),
+            targets,
+        )
+
+    def test_a_short_plan_is_rejected(self):
+        from app.agent.validators import validate_plan
+
+        plan, profile, targets = self._plan_and_profile(2)
+        result = validate_plan(plan, profile, targets, expected_days=7)
+
+        assert not result.is_valid
+        assert any("expected 7" in e for e in result.errors)
+
+    def test_a_long_plan_is_rejected(self):
+        from app.agent.validators import validate_plan
+
+        plan, profile, targets = self._plan_and_profile(9)
+        assert not validate_plan(plan, profile, targets, expected_days=7).is_valid
+
+    def test_the_right_length_passes(self):
+        from app.agent.validators import validate_plan
+
+        plan, profile, targets = self._plan_and_profile(7)
+        assert validate_plan(plan, profile, targets, expected_days=7).is_valid
+
+    def test_the_check_is_opt_in(self):
+        """Callers that do not know the intended length skip it rather than
+        guessing at one."""
+        from app.agent.validators import validate_plan
+
+        plan, profile, targets = self._plan_and_profile(2)
+        assert validate_plan(plan, profile, targets).is_valid

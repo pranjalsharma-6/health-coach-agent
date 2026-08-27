@@ -642,15 +642,14 @@ def build_trainer_prompt(
 - **Every non-rest day must list its exercises**, each with sets, reps and rest.
   "Upper body training" on its own is not a plan anyone can follow.
 - Use exact names from the exercise list. Do not invent or rename movements.
-- 3 to 5 exercises for a strength session; 1 to 2 for a cardio or mobility day.
+- 3 or 4 exercises for a strength session; 1 to 2 for a cardio or mobility
+  day. Keep it tight — a long list is where output goes wrong.
 - A strength session of three or more movements must train more than one
   pattern — do not build a session entirely out of pushes.
 - Keep one or two easy mobility days in the week even when the user picked a
   single style, and say so in the day's description. A week of nothing but
   hard sessions is how people get hurt and stop. Naming the exception is the
   point: silently ignoring what they asked for is worse than explaining it.
-- Leave `cue` empty unless you have something to add. The list's own cue is
-  used by default and is more reliable than a generated one.
 - `reasoning` is two to three sentences on the shape of the week: the split, the
   progression, and where recovery sits."""
     )

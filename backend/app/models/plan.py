@@ -325,11 +325,75 @@ class MealPlanDraft(BaseModel):
     days: List[DayMeals]
 
 
+class ExerciseDraft(BaseModel):
+    """One movement, as the trainer is asked to produce it.
+
+    No `cue`: the table's form cue is filled in during assembly and is more
+    reliable than a generated one, so asking for it produced 35 fields of
+    `"cue": null` per week — pure output the model had to emit correctly for
+    no benefit. In json_mode nothing constrains the output, and a long nested
+    array is where a model drifts and stops closing its braces.
+    """
+
+    name: str = Field(
+        description=(
+            "Exact name from the provided exercise list. Do not invent "
+            "exercises or rename them."
+        )
+    )
+    sets: int = Field(description="Number of working sets.", ge=1, le=10)
+    reps: str = Field(
+        description=(
+            "Reps or duration as text, since these differ in kind: '8-12', "
+            "'30 seconds', '10 each side', '20 minutes'."
+        )
+    )
+    rest_seconds: int = Field(
+        default=90, description="Rest between sets. 0 for continuous work.", ge=0, le=300
+    )
+
+    def to_prescription(self) -> "ExercisePrescription":
+        return ExercisePrescription(
+            name=self.name,
+            sets=self.sets,
+            reps=self.reps,
+            rest_seconds=self.rest_seconds,
+        )
+
+
+class ActivityDraft(BaseModel):
+    """A day's session, as the trainer is asked to produce it.
+
+    Narrower than `ActivityItem` for the same reason: `target_steps` has a
+    sensible default and does not need generating seven times.
+    """
+
+    activity_type: str = Field(
+        description="e.g. 'Strength training — full body', 'Easy cardio', 'Rest'."
+    )
+    duration_minutes: int = Field(description="Suggested duration; 0 for a rest day.")
+    intensity: str = Field(description="One of: low, moderate, high.")
+    description: str = Field(description="One sentence on the goal of this session.")
+    exercises: List[ExerciseDraft] = Field(
+        default_factory=list,
+        description="Empty on a rest day, and on nothing else.",
+    )
+
+    def to_activity_item(self) -> "ActivityItem":
+        return ActivityItem(
+            activity_type=self.activity_type,
+            duration_minutes=self.duration_minutes,
+            intensity=self.intensity,
+            description=self.description,
+            exercises=[e.to_prescription() for e in self.exercises],
+        )
+
+
 class DayTraining(BaseModel):
     """One day's activity, without the food."""
 
     day: int = Field(description="Day number, starting at 1.")
-    activity: ActivityItem
+    activity: ActivityDraft
 
 
 class TrainingPlanDraft(BaseModel):

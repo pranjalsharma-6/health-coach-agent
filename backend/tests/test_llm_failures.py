@@ -622,3 +622,94 @@ class TestJsonModeEscapeHatch:
         from app.core.config import Settings
 
         assert Settings(_env_file=None).llm_structured_method == "function_calling"
+
+
+class TestJsonValidateFailed:
+    """The json_mode counterpart of a missed tool call.
+
+    In json_mode nothing constrains the output, so a long nested array is where
+    a model drifts: the observed failure closed day 1 correctly and then wrote
+    `,"day":2` straight into the array without opening a brace. Groq reports
+    that as a 400, which was classified non-retryable — so the run gave up
+    after a single attempt at a failure that is different every time.
+    """
+
+    @staticmethod
+    def _json_validate_failed():
+        return ProviderError(
+            "Error code: 400 - {'error': {'message': \"Failed to generate JSON. "
+            "Please adjust your prompt. See 'failed_generation' for more "
+            "details.\", 'code': 'json_validate_failed'}}",
+            400,
+        )
+
+    def test_it_is_retried(self):
+        assert describe_llm_failure(self._json_validate_failed()).retryable is True
+
+    def test_a_genuinely_malformed_request_is_still_not_retried(self):
+        assert (
+            describe_llm_failure(ProviderError("unsupported field", 400)).retryable
+            is False
+        )
+
+    async def test_the_agent_uses_its_full_retry_budget(self, wired, monkeypatch):
+        calls: list = []
+        monkeypatch.setattr(
+            graph,
+            "get_structured_llm",
+            always_raising(self._json_validate_failed(), calls),
+        )
+
+        final = await graph.run_agent("u1", today=TODAY)
+
+        meal_errors = sum(
+            1
+            for s in final["steps"]
+            if s["node"] == "plan_meals" and s["status"] == "error"
+        )
+        assert meal_errors == graph.MAX_GENERATION_ATTEMPTS
+
+
+class TestTrainerOutputSize:
+    """Every field the trainer emits is a field it can get wrong.
+
+    The trainer's JSON started drifting once each day carried a list of
+    exercises. `cue` was the worst offender: filled from the exercise table
+    during assembly anyway, so asking for it produced ~35 `"cue": null` per
+    week — output that had to be emitted correctly for no benefit, in exactly
+    the place the drift happened.
+    """
+
+    def test_the_draft_does_not_ask_for_cues(self):
+        from app.models.plan import ExerciseDraft
+
+        assert "cue" not in ExerciseDraft.model_fields
+
+    def test_the_draft_does_not_ask_for_step_targets(self):
+        """Seven identical values with a sensible default."""
+        from app.models.plan import ActivityDraft
+
+        assert "target_steps" not in ActivityDraft.model_fields
+
+    def test_the_stored_form_still_has_both(self):
+        """Narrowing what the model emits must not narrow what we keep."""
+        from app.models.plan import ActivityItem, ExercisePrescription
+
+        assert "cue" in ExercisePrescription.model_fields
+        assert "target_steps" in ActivityItem.model_fields
+
+    def test_widening_preserves_the_session(self):
+        from app.models.plan import ActivityDraft, ExerciseDraft
+
+        draft = ActivityDraft(
+            activity_type="Strength training — full body",
+            duration_minutes=45,
+            intensity="moderate",
+            description="Compound work.",
+            exercises=[ExerciseDraft(name="Push-ups", sets=3, reps="8-12")],
+        )
+        item = draft.to_activity_item()
+
+        assert item.activity_type == draft.activity_type
+        assert [e.name for e in item.exercises] == ["Push-ups"]
+        assert item.target_steps > 0, "the default should apply"

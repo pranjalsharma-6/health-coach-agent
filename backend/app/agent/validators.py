@@ -11,7 +11,7 @@ regeneration; warnings are recorded but tolerated.
 
 import re
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from app.core.logging import get_logger
 from app.models.enums import DietType
@@ -56,11 +56,12 @@ def validate_plan(
     plan: HealthPlan,
     profile: ProfileInDB,
     targets: NutritionTargets,
+    expected_days: Optional[int] = None,
 ) -> ValidationResult:
     """Run every check against a generated plan."""
     result = ValidationResult()
 
-    _check_structure(plan, profile, result)
+    _check_structure(plan, profile, result, expected_days)
     _check_diet_compliance(plan, profile, result)
     _check_allergens(plan, profile, result)
 
@@ -84,11 +85,22 @@ def validate_plan(
 # Structure
 # --------------------------------------------------------------------------- #
 def _check_structure(
-    plan: HealthPlan, profile: ProfileInDB, result: ValidationResult
+    plan: HealthPlan,
+    profile: ProfileInDB,
+    result: ValidationResult,
+    expected_days: Optional[int] = None,
 ) -> None:
     if not plan.daily_plans:
         result.errors.append("Plan contains no days.")
         return
+
+    # A short week passed every check below: the numbering of [1, 2] is
+    # perfectly sequential. The run reported "Drafted 2 days of meals" and
+    # would have shipped a two-day week as a seven-day plan.
+    if expected_days is not None and len(plan.daily_plans) != expected_days:
+        result.errors.append(
+            f"Plan has {len(plan.daily_plans)} days, expected {expected_days}."
+        )
 
     day_numbers = [d.day for d in plan.daily_plans]
     expected = list(range(1, len(plan.daily_plans) + 1))

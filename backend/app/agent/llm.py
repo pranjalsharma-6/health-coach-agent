@@ -99,15 +99,17 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
         )
 
     if status == 400:
-        # `tool_use_failed` is not a malformed request — it means the model was
-        # asked for structured output and did not manage to produce a tool call
-        # this time. That is precisely what the retry budget exists for, and
-        # lumping it in with genuine 400s meant one attempt and no second
-        # chance. An empty `failed_generation` usually means the answer was
-        # truncated: reasoning models spend `max_tokens` on reasoning before
-        # they emit anything, so a budget that fits the answer can still leave
-        # nothing for it.
-        if "tool_use_failed" in detail:
+        # Neither `tool_use_failed` nor `json_validate_failed` is a malformed
+        # request. Both mean the model was asked for structured output and did
+        # not manage to produce it *this time* — a missed tool call, or JSON
+        # that drifted and stopped closing its braces partway through a long
+        # array. That is precisely what the retry budget exists for, and
+        # lumping them in with genuine 400s meant one attempt and no second
+        # chance. An empty `failed_generation` points at truncation instead:
+        # reasoning models spend `max_tokens` thinking before they emit
+        # anything, so a budget that fits the answer can still leave none for
+        # it.
+        if "tool_use_failed" in detail or "json_validate_failed" in detail:
             return LLMFailure(
                 "The model did not return the structured output the plan needs. "
                 "If this repeats, the output budget is likely being consumed "

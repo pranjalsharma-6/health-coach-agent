@@ -82,27 +82,25 @@ def make_meal(
 # A valid beginner session: four patterns, no equipment at all, every movement
 # in the table. Equipment-free on purpose — bodyweight is the default training
 # style, so this fixture stays valid for a profile that made no choices.
-def make_exercises() -> list:
-    from app.models.plan import ExercisePrescription
+def make_exercises(draft: bool = False) -> list:
+    """`draft=True` returns the trainer's output shape, which carries no cue —
+    that is filled from the exercise table during assembly."""
+    from app.models.plan import ExerciseDraft, ExercisePrescription
 
+    cls = ExerciseDraft if draft else ExercisePrescription
     return [
-        ExercisePrescription(name="Push-ups", sets=3, reps="8-12", rest_seconds=90),
-        ExercisePrescription(name="Inverted row", sets=3, reps="8-12", rest_seconds=90),
-        ExercisePrescription(
-            name="Bodyweight squat", sets=3, reps="12-20", rest_seconds=90
-        ),
-        ExercisePrescription(name="Plank", sets=3, reps="30 seconds", rest_seconds=60),
+        cls(name="Push-ups", sets=3, reps="8-12", rest_seconds=90),
+        cls(name="Inverted row", sets=3, reps="8-12", rest_seconds=90),
+        cls(name="Bodyweight squat", sets=3, reps="12-20", rest_seconds=90),
+        cls(name="Plank", sets=3, reps="30 seconds", rest_seconds=60),
     ]
 
 
-def make_cardio_exercises() -> list:
-    from app.models.plan import ExercisePrescription
+def make_cardio_exercises(draft: bool = False) -> list:
+    from app.models.plan import ExerciseDraft, ExercisePrescription
 
-    return [
-        ExercisePrescription(
-            name="Brisk walk", sets=1, reps="30 minutes", rest_seconds=0
-        )
-    ]
+    cls = ExerciseDraft if draft else ExercisePrescription
+    return [cls(name="Brisk walk", sets=1, reps="30 minutes", rest_seconds=0)]
 
 
 def make_day(day: int, targets: NutritionTargets, meals_per_day: int = 4) -> DailyPlan:
@@ -237,17 +235,18 @@ def make_training_draft(days: int = 7) -> "TrainingPlanDraft":
     """The trainer's half — a sane week with one genuine rest day."""
     from app.models.plan import DayTraining, TrainingPlanDraft
 
-    def activity(day: int) -> ActivityItem:
+    def activity(day: int) -> "ActivityDraft":
+        from app.models.plan import ActivityDraft
+
         if day == 4:
-            return ActivityItem(
+            return ActivityDraft(
                 activity_type="Rest",
                 duration_minutes=0,
                 intensity="low",
                 description="Full recovery day.",
-                target_steps=6000,
             )
         hard = bool(day % 2)
-        return ActivityItem(
+        return ActivityDraft(
             activity_type="Strength training — full body" if hard else "Brisk walk",
             duration_minutes=45 if hard else 30,
             intensity="moderate" if hard else "low",
@@ -256,8 +255,11 @@ def make_training_draft(days: int = 7) -> "TrainingPlanDraft":
                 if hard
                 else "Easy pace, keep it conversational."
             ),
-            target_steps=8000,
-            exercises=make_exercises() if hard else make_cardio_exercises(),
+            exercises=(
+                make_exercises(draft=True)
+                if hard
+                else make_cardio_exercises(draft=True)
+            ),
         )
 
     return TrainingPlanDraft(

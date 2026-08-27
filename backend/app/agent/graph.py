@@ -473,7 +473,10 @@ async def assemble_node(state: AgentState) -> Dict[str, Any]:
             "validation_errors": ["The nutritionist produced no meals."],
         }
 
-    by_day = {d.day: d.activity for d in (training.days if training else [])}
+    by_day = {
+        d.day: d.activity.to_activity_item()
+        for d in (training.days if training else [])
+    }
     fallback = ActivityItem(
         activity_type="Rest",
         duration_minutes=0,
@@ -606,7 +609,9 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
         # Drafting already failed; the retry edge decides what happens next.
         return {}
 
-    result = validate_plan(plan, state["profile"], state["targets"])
+    result = validate_plan(
+        plan, state["profile"], state["targets"], expected_days=PLAN_DURATION_DAYS
+    )
 
     if result.is_valid:
         message = "Plan passed all checks."

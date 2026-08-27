@@ -512,7 +512,9 @@ def _stub_llm(monkeypatch, *plans: HealthPlan) -> None:
     """
     from app.models.plan import (
         DayMeals,
+        ActivityDraft,
         DayTraining,
+        ExerciseDraft,
         MealDraftItem,
         MealPlanDraft,
         PlanCritique,
@@ -537,7 +539,27 @@ def _stub_llm(monkeypatch, *plans: HealthPlan) -> None:
     training = TrainingPlanDraft(
         reasoning="Alternating strength and easy movement with a mid-week rest day.",
         days=[
-            DayTraining(day=d.day, activity=d.activity)
+            DayTraining(
+                day=d.day,
+                activity=ActivityDraft(
+                    activity_type=d.activity.activity_type,
+                    duration_minutes=d.activity.duration_minutes,
+                    intensity=d.activity.intensity,
+                    description=d.activity.description,
+                    # Carried through: a non-rest day with no exercises is a
+                    # validation error, so dropping them here would reject
+                    # every plan these tests build.
+                    exercises=[
+                        ExerciseDraft(
+                            name=e.name,
+                            sets=e.sets,
+                            reps=e.reps,
+                            rest_seconds=e.rest_seconds,
+                        )
+                        for e in d.activity.exercises
+                    ],
+                ),
+            )
             for d in plans[0].daily_plans
         ],
     )
