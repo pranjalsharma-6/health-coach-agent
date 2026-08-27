@@ -39,6 +39,23 @@ class Settings(BaseSettings):
     # `app/agent/llm.py`; set it when your key's tokens-per-minute limit is
     # tighter than those assume, which shows up as a 413 rather than a 429.
     llm_max_tokens: Optional[int] = Field(default=None, ge=256, le=32000)
+    # Reasoning models spend output tokens thinking before they answer. On a
+    # tight rate limit that can consume the whole budget, leaving nothing for
+    # the structured result. Sent to the provider only when set.
+    llm_reasoning_effort: Optional[str] = Field(default=None)
+
+    @field_validator("llm_reasoning_effort", mode="before")
+    @classmethod
+    def _normalise_effort(cls, v):
+        if isinstance(v, str):
+            v = v.strip().lower()
+            if not v:
+                return None
+            if v not in {"low", "medium", "high"}:
+                raise ValueError(
+                    "LLM_REASONING_EFFORT must be low, medium or high"
+                )
+        return v
 
     @field_validator("llm_max_tokens", mode="before")
     @classmethod

@@ -206,7 +206,7 @@ Open <http://localhost:3000>.
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-python -m pytest -q          # 377 tests
+python -m pytest -q          # 386 tests
 python -m evals.run          # agent evaluation report
 ```
 
@@ -242,7 +242,7 @@ backend/
     models/       Pydantic domain models and enums
     services/     nutrition math, adherence evaluation, ingredient table
   evals/          agent evaluation suite (decisions + validator detection)
-  tests/          377 tests — examples, properties, API integration, evals
+  tests/          386 tests — examples, properties, API integration, evals
 frontend/
   app/            landing · login · register · onboarding · dashboard
   components/     agent runner, meal cards, UI primitives

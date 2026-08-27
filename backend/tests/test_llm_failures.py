@@ -410,3 +410,140 @@ class TestRequestTooLarge:
     def test_413_names_the_setting_that_fixes_it(self):
         failure = describe_llm_failure(ProviderError("too large", 413))
         assert "LLM_MAX_TOKENS" in failure.message
+
+
+class TestToolUseFailed:
+    """`tool_use_failed` is the model missing a tool call, not a bad request.
+
+    Groq reports it as a 400, and treating every 400 as a client error meant
+    the agent gave up after one attempt on exactly the transient failure the
+    retry budget exists for. The observed case had an empty `failed_generation`
+    — the model produced nothing at all.
+    """
+
+    @staticmethod
+    def _tool_use_failed():
+        return ProviderError(
+            "Error code: 400 - {'error': {'message': 'Tool choice is required, "
+            "but model did not call a tool', 'code': 'tool_use_failed', "
+            "'failed_generation': ''}}",
+            400,
+        )
+
+    def test_it_is_retried(self):
+        assert describe_llm_failure(self._tool_use_failed()).retryable is True
+
+    def test_it_names_the_settings_that_help(self):
+        message = describe_llm_failure(self._tool_use_failed()).message
+        assert "LLM_REASONING_EFFORT" in message
+
+    def test_a_genuinely_malformed_request_is_still_not_retried(self):
+        """Not every 400 is worth another attempt — the distinction is the
+        point of the change."""
+        failure = describe_llm_failure(ProviderError("unsupported field 'x'", 400))
+        assert failure.retryable is False
+
+    async def test_the_agent_uses_its_full_retry_budget(self, wired, monkeypatch):
+        calls: list = []
+        monkeypatch.setattr(
+            graph,
+            "get_structured_llm",
+            always_raising(self._tool_use_failed(), calls),
+        )
+
+        final = await graph.run_agent("u1", today=TODAY)
+
+        meal_errors = sum(
+            1
+            for s in final["steps"]
+            if s["node"] == "plan_meals" and s["status"] == "error"
+        )
+        assert meal_errors == graph.MAX_GENERATION_ATTEMPTS, (
+            "a missed tool call should be retried, not treated as a bad request"
+        )
+
+
+class TestReasoningEffort:
+    def test_it_is_omitted_when_unset(self, monkeypatch):
+        """Providers that do not know the field must be unaffected."""
+        import sys
+        import types
+
+        import app.agent.llm as llm_module
+
+        captured = {}
+
+        class FakeChat:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        fake = types.ModuleType("langchain_groq")
+        fake.ChatGroq = FakeChat
+        monkeypatch.setitem(sys.modules, "langchain_groq", fake)
+        monkeypatch.setattr(settings, "groq_api_key", "gsk_test")
+        monkeypatch.setattr(settings, "llm_reasoning_effort", None)
+        llm_module.reset_cache()
+
+        llm_module.get_llm(1000)
+        assert captured["model_kwargs"] == {}
+        llm_module.reset_cache()
+
+    def test_it_is_passed_through_when_set(self, monkeypatch):
+        import sys
+        import types
+
+        import app.agent.llm as llm_module
+
+        captured = {}
+
+        class FakeChat:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        fake = types.ModuleType("langchain_groq")
+        fake.ChatGroq = FakeChat
+        monkeypatch.setitem(sys.modules, "langchain_groq", fake)
+        monkeypatch.setattr(settings, "groq_api_key", "gsk_test")
+        monkeypatch.setattr(settings, "llm_reasoning_effort", "low")
+        llm_module.reset_cache()
+
+        llm_module.get_llm(1000)
+        assert captured["model_kwargs"] == {"reasoning_effort": "low"}
+        llm_module.reset_cache()
+
+
+class TestReasoningEffortSetting:
+    def test_blank_means_unset(self):
+        from app.core.config import Settings
+
+        import os
+
+        os.environ["LLM_REASONING_EFFORT"] = ""
+        try:
+            assert Settings(_env_file=None).llm_reasoning_effort is None
+        finally:
+            os.environ.pop("LLM_REASONING_EFFORT", None)
+
+    def test_case_is_normalised(self):
+        from app.core.config import Settings
+
+        import os
+
+        os.environ["LLM_REASONING_EFFORT"] = "  LOW "
+        try:
+            assert Settings(_env_file=None).llm_reasoning_effort == "low"
+        finally:
+            os.environ.pop("LLM_REASONING_EFFORT", None)
+
+    def test_a_nonsense_value_is_rejected_at_startup(self):
+        """Better to fail loudly on boot than to have every model call 400."""
+        import os
+
+        from app.core.config import Settings
+
+        os.environ["LLM_REASONING_EFFORT"] = "maximum"
+        try:
+            with pytest.raises(Exception, match="low, medium or high"):
+                Settings(_env_file=None)
+        finally:
+            os.environ.pop("LLM_REASONING_EFFORT", None)

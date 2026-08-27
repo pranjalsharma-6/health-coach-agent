@@ -23,8 +23,11 @@ logger = get_logger(__name__)
 # all, and every call came back 413. These are sized to what each schema
 # actually produces — a training week is seven activities, not a novel.
 MAX_OUTPUT_TOKENS: Dict[str, int] = {
-    "MealPlanDraft": 3500,      # 7 days x ~4 meals, each with macros
-    "TrainingPlanDraft": 1000,  # 7 days x 1 activity
+    # The meal budget also has to cover a reasoning model's thinking tokens,
+    # which are spent before the answer begins. Sized to the largest value the
+    # fan-out can afford against an 8000 TPM tier, not to the answer alone.
+    "MealPlanDraft": 5000,      # 7 days x ~4 meals, each with macros
+    "TrainingPlanDraft": 800,   # 7 days x 1 activity
     "PlanCritique": 700,        # a verdict and a short list of issues
     "Recipe": 1200,             # ingredients, steps, tips for one meal
 }
@@ -96,6 +99,24 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
         )
 
     if status == 400:
+        # `tool_use_failed` is not a malformed request — it means the model was
+        # asked for structured output and did not manage to produce a tool call
+        # this time. That is precisely what the retry budget exists for, and
+        # lumping it in with genuine 400s meant one attempt and no second
+        # chance. An empty `failed_generation` usually means the answer was
+        # truncated: reasoning models spend `max_tokens` on reasoning before
+        # they emit anything, so a budget that fits the answer can still leave
+        # nothing for it.
+        if "tool_use_failed" in detail:
+            return LLMFailure(
+                "The model did not return the structured output the plan needs. "
+                "If this repeats, the output budget is likely being consumed "
+                "before the answer starts — set LLM_REASONING_EFFORT=low in "
+                "backend/.env, or raise LLM_MAX_TOKENS if your rate limit "
+                "allows.",
+                retryable=True,
+            )
+
         return LLMFailure(
             f"The provider rejected the request: {detail}",
             retryable=False,
@@ -149,6 +170,17 @@ def get_llm(max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> BaseChatModel:
             max_tokens=max_tokens,
             timeout=90,
             max_retries=2,
+            # Only sent when configured. Reasoning models spend part of the
+            # output budget thinking before they answer; turning that down
+            # leaves more of it for the structured result. Passed through
+            # model_kwargs because it is a provider parameter, not a LangChain
+            # one, and omitted entirely when unset so providers that reject the
+            # field are unaffected.
+            model_kwargs=(
+                {"reasoning_effort": settings.llm_reasoning_effort}
+                if settings.llm_reasoning_effort
+                else {}
+            ),
         )
         logger.info(
             "LLM provider: Groq (%s, max_tokens=%s)", settings.llm_model, max_tokens
