@@ -5,6 +5,9 @@ Groq for OpenAI (or anything else LangChain speaks) is a config change, not a
 refactor.
 """
 
+import asyncio
+import re
+
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -225,11 +228,83 @@ def get_structured_llm(schema: Any) -> Any:
     llm = get_llm(budget_for(schema))
 
     if settings.llm_structured_method == "json_mode":
-        return _JsonModeAdapter(
-            llm.with_structured_output(schema, method="json_mode"), schema
+        return _RateLimitRetrying(
+            _JsonModeAdapter(
+                llm.with_structured_output(schema, method="json_mode"), schema
+            )
         )
 
-    return llm.with_structured_output(schema)
+    return _RateLimitRetrying(llm.with_structured_output(schema))
+
+
+# How long to wait for a rate-limit window, and how many times.
+#
+# The generation retry budget and a per-minute token limit interact badly: a
+# 7-day plan costs most of an 8000 TPM window on its first attempt, so an
+# immediate second attempt is guaranteed to be refused. Waiting for the window
+# to roll is the difference between three attempts and one.
+MAX_RATE_LIMIT_WAITS = 2
+DEFAULT_RATE_LIMIT_WAIT_SECONDS = 35.0
+MAX_RATE_LIMIT_WAIT_SECONDS = 90.0
+
+
+def parse_retry_after_seconds(message: str) -> Optional[float]:
+    """How long the provider asked us to wait, if it said.
+
+    Groq phrases it inside the error text — "Please try again in 1m13.5s" —
+    rather than only in a header, and the header is not reachable through the
+    exception LangChain surfaces. Honouring the provider's own number beats
+    guessing at one.
+    """
+    match = re.search(
+        r"try again in\s+(?:(\d+)m)?\s*([\d.]+)s", message, re.IGNORECASE
+    )
+    if not match:
+        return None
+
+    minutes = float(match.group(1) or 0)
+    seconds = float(match.group(2))
+    return min(minutes * 60 + seconds, MAX_RATE_LIMIT_WAIT_SECONDS)
+
+
+class _RateLimitRetrying:
+    """Waits out a rate limit rather than spending a generation attempt on it.
+
+    Being told "you have used your tokens for this minute" is not a failure of
+    the plan, and re-drafting immediately only earns the same refusal. This
+    waits for the window and repeats the identical call, so the agent's three
+    attempts stay available for problems that are actually about the food.
+
+    `sleep` is injected so tests do not spend real time.
+    """
+
+    def __init__(self, runnable: Any, sleep=asyncio.sleep):
+        self._runnable = runnable
+        self._sleep = sleep
+
+    async def ainvoke(self, messages: Any) -> Any:
+        for attempt in range(MAX_RATE_LIMIT_WAITS + 1):
+            try:
+                return await self._runnable.ainvoke(messages)
+            except Exception as exc:
+                if attempt == MAX_RATE_LIMIT_WAITS:
+                    raise
+                if getattr(exc, "status_code", None) != 429:
+                    raise
+
+                wait = (
+                    parse_retry_after_seconds(str(exc))
+                    or DEFAULT_RATE_LIMIT_WAIT_SECONDS
+                )
+                logger.warning(
+                    "Rate limited; waiting %.1fs before retrying (%s/%s)",
+                    wait,
+                    attempt + 1,
+                    MAX_RATE_LIMIT_WAITS,
+                )
+                await self._sleep(wait)
+
+        raise RuntimeError("unreachable")  # pragma: no cover
 
 
 class _JsonModeAdapter:

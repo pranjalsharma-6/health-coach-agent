@@ -728,3 +728,126 @@ class TestTrainerOutputSize:
         assert item.activity_type == draft.activity_type
         assert [e.name for e in item.exercises] == ["Push-ups"]
         assert item.target_steps > 0, "the default should apply"
+
+
+class TestRateLimitWaiting:
+    """Being rate limited is not a failure of the plan.
+
+    A 7-day plan costs most of an 8000 TPM window on its first attempt, so an
+    immediate retry is guaranteed to be refused — the observed run spent
+    attempts 2 and 3 on nothing but 429s. Waiting for the window to roll keeps
+    the generation budget for problems that are actually about the food.
+    """
+
+    class Waits:
+        """Records sleeps instead of taking them."""
+
+        def __init__(self):
+            self.slept: list[float] = []
+
+        async def __call__(self, seconds: float) -> None:
+            self.slept.append(seconds)
+
+    @staticmethod
+    def _rate_limited(hint: str = ""):
+        return ProviderError(f"Rate limit reached. {hint}", 429)
+
+    def _wrap(self, inner, waits):
+        import app.agent.llm as llm_module
+
+        return llm_module._RateLimitRetrying(inner, sleep=waits)
+
+    async def test_it_waits_and_succeeds(self):
+        from app.agent.llm import _RateLimitRetrying  # noqa: F401
+
+        waits = self.Waits()
+        calls = {"n": 0}
+
+        class Flaky:
+            async def ainvoke(self, _messages):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise TestRateLimitWaiting._rate_limited("Please try again in 22.5s")
+                return "the plan"
+
+        result = await self._wrap(Flaky(), waits).ainvoke([])
+
+        assert result == "the plan"
+        assert waits.slept == [22.5], "the provider's own number should be used"
+
+    async def test_it_falls_back_when_no_hint_is_given(self):
+        from app.agent.llm import DEFAULT_RATE_LIMIT_WAIT_SECONDS
+
+        waits = self.Waits()
+        calls = {"n": 0}
+
+        class Flaky:
+            async def ainvoke(self, _messages):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise TestRateLimitWaiting._rate_limited()
+                return "the plan"
+
+        await self._wrap(Flaky(), waits).ainvoke([])
+        assert waits.slept == [DEFAULT_RATE_LIMIT_WAIT_SECONDS]
+
+    async def test_it_gives_up_eventually(self):
+        from app.agent.llm import MAX_RATE_LIMIT_WAITS
+
+        waits = self.Waits()
+
+        class AlwaysLimited:
+            async def ainvoke(self, _messages):
+                raise TestRateLimitWaiting._rate_limited()
+
+        with pytest.raises(ProviderError):
+            await self._wrap(AlwaysLimited(), waits).ainvoke([])
+
+        assert len(waits.slept) == MAX_RATE_LIMIT_WAITS
+
+    async def test_other_failures_are_not_waited_on(self):
+        """A retired model does not become available in thirty seconds."""
+        waits = self.Waits()
+
+        class NotFound:
+            async def ainvoke(self, _messages):
+                raise ProviderError("model_not_found", 404)
+
+        with pytest.raises(ProviderError):
+            await self._wrap(NotFound(), waits).ainvoke([])
+
+        assert waits.slept == []
+
+    async def test_a_successful_call_never_waits(self):
+        waits = self.Waits()
+
+        class Fine:
+            async def ainvoke(self, _messages):
+                return "the plan"
+
+        assert await self._wrap(Fine(), waits).ainvoke([]) == "the plan"
+        assert waits.slept == []
+
+    def test_the_wait_is_capped(self):
+        """A provider asking for ten minutes should not freeze the run."""
+        from app.agent.llm import (
+            MAX_RATE_LIMIT_WAIT_SECONDS,
+            parse_retry_after_seconds,
+        )
+
+        assert parse_retry_after_seconds("try again in 10m0s") == (
+            MAX_RATE_LIMIT_WAIT_SECONDS
+        )
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("Please try again in 1m13.5s", 73.5),
+            ("try again in 24.9s", 24.9),
+            ("nothing useful here", None),
+        ],
+    )
+    def test_hint_parsing(self, text, expected):
+        from app.agent.llm import parse_retry_after_seconds
+
+        assert parse_retry_after_seconds(text) == expected
