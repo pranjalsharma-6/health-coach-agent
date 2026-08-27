@@ -171,3 +171,30 @@ class TestCuisinePreferences:
         block = build_constraints_block(self._profile(cuisine_preferences=["south_indian"]))
         assert "several cuisines" not in block
         assert "idli" in block
+
+
+class TestOptionalIntegerSettings:
+    def test_a_blank_llm_max_tokens_means_unset(self, from_env):
+        """Leaving an optional key empty is the obvious thing to do. Pydantic
+        refuses "" as an int, so without coercion the app dies at import over
+        a setting the user did not need."""
+        assert from_env_int(from_env, "") is None
+
+    def test_a_real_value_is_read(self, from_env):
+        assert from_env_int(from_env, "1500") == 1500
+
+    def test_unset_is_none(self, from_env):
+        assert from_env_int(from_env, None) is None
+
+
+def from_env_int(from_env, raw):
+    import os
+
+    if raw is None:
+        os.environ.pop("LLM_MAX_TOKENS", None)
+    else:
+        os.environ["LLM_MAX_TOKENS"] = raw
+    try:
+        return Settings(_env_file=None).llm_max_tokens
+    finally:
+        os.environ.pop("LLM_MAX_TOKENS", None)

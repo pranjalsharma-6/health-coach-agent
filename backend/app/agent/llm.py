@@ -6,7 +6,7 @@ refactor.
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -15,7 +15,24 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-_llm: Optional[BaseChatModel] = None
+# Output budgets, per structured-output schema.
+#
+# `max_tokens` is not a cap you can leave generous "just in case": providers
+# count the space you *reserve* against your rate limit, so an 8000-token
+# reservation exhausted an 8000 TPM free tier before the prompt was counted at
+# all, and every call came back 413. These are sized to what each schema
+# actually produces — a training week is seven activities, not a novel.
+MAX_OUTPUT_TOKENS: Dict[str, int] = {
+    "MealPlanDraft": 3500,      # 7 days x ~4 meals, each with macros
+    "TrainingPlanDraft": 1000,  # 7 days x 1 activity
+    "PlanCritique": 700,        # a verdict and a short list of issues
+    "Recipe": 1200,             # ingredients, steps, tips for one meal
+}
+DEFAULT_MAX_OUTPUT_TOKENS = 2000
+
+# Cached per budget: the budget is a constructor argument, so one client per
+# distinct value rather than one client overall.
+_llm_by_budget: Dict[int, BaseChatModel] = {}
 
 
 class LLMUnavailableError(RuntimeError):
@@ -62,6 +79,15 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
             retryable=False,
         )
 
+    if status == 413:
+        return LLMFailure(
+            "The request was larger than your provider plan allows. Providers "
+            "count the output tokens you reserve against your per-minute "
+            "limit, so lowering LLM_MAX_TOKENS in backend/.env (try 1500) "
+            "usually fixes this. The error text names your limit.",
+            retryable=False,
+        )
+
     if status == 429:
         return LLMFailure(
             "Rate limited by the provider. The free tier has a per-minute cap; "
@@ -90,42 +116,60 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
     )
 
 
-def get_llm() -> BaseChatModel:
+def budget_for(schema: Any) -> int:
+    """How many output tokens this schema is allowed to use.
+
+    `LLM_MAX_TOKENS` caps every budget when set, for keys on a tighter rate
+    limit than the defaults assume.
+    """
+    budget = MAX_OUTPUT_TOKENS.get(
+        getattr(schema, "__name__", ""), DEFAULT_MAX_OUTPUT_TOKENS
+    )
+    ceiling = settings.llm_max_tokens
+    return min(budget, ceiling) if ceiling else budget
+
+
+def get_llm(max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> BaseChatModel:
     """Return a cached chat model, preferring Groq.
 
-    Groq runs Llama 3.3 70B at very low latency on a free tier, which matters
-    for an agent the user watches work in real time.
+    Groq serves large open models at very low latency on a free tier, which
+    matters for an agent the user watches work in real time.
     """
-    global _llm
-    if _llm is not None:
-        return _llm
+    cached = _llm_by_budget.get(max_tokens)
+    if cached is not None:
+        return cached
 
     if settings.groq_api_key:
         from langchain_groq import ChatGroq
 
-        _llm = ChatGroq(
+        llm = ChatGroq(
             model=settings.llm_model,
             temperature=settings.llm_temperature,
             api_key=settings.groq_api_key,
-            max_tokens=8000,
+            max_tokens=max_tokens,
             timeout=90,
             max_retries=2,
         )
-        logger.info("LLM provider: Groq (%s)", settings.llm_model)
-        return _llm
+        logger.info(
+            "LLM provider: Groq (%s, max_tokens=%s)", settings.llm_model, max_tokens
+        )
+        _llm_by_budget[max_tokens] = llm
+        return llm
 
     if settings.openai_api_key:
         from langchain_openai import ChatOpenAI
 
-        _llm = ChatOpenAI(
+        llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=settings.llm_temperature,
             api_key=settings.openai_api_key,
+            max_tokens=max_tokens,
             timeout=90,
             max_retries=2,
         )
-        logger.info("LLM provider: OpenAI (gpt-4o-mini)")
-        return _llm
+        logger.info("LLM provider: OpenAI (gpt-4o-mini, max_tokens=%s)", max_tokens)
+        _llm_by_budget[max_tokens] = llm
+        return llm
 
     raise LLMUnavailableError(
         "No LLM provider configured. Set GROQ_API_KEY (free at console.groq.com) "
@@ -140,7 +184,7 @@ def get_structured_llm(schema: Any) -> Any:
     validator in `validators.py` is the second, because schema-valid output can
     still be nutritionally wrong or violate the user's diet.
     """
-    return get_llm().with_structured_output(schema)
+    return get_llm(budget_for(schema)).with_structured_output(schema)
 
 
 def is_configured() -> bool:
@@ -148,6 +192,5 @@ def is_configured() -> bool:
 
 
 def reset_cache() -> None:
-    """Drop the cached client. Used by tests."""
-    global _llm
-    _llm = None
+    """Drop the cached clients. Used by tests."""
+    _llm_by_budget.clear()

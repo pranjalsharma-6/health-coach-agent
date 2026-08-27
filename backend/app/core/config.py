@@ -2,7 +2,7 @@
 
 import json
 from functools import lru_cache
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -35,6 +35,23 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     llm_model: str = Field(default="llama-3.3-70b-versatile")
     llm_temperature: float = Field(default=0.4)
+    # Caps every per-schema output budget. Leave unset to use the defaults in
+    # `app/agent/llm.py`; set it when your key's tokens-per-minute limit is
+    # tighter than those assume, which shows up as a 413 rather than a 429.
+    llm_max_tokens: Optional[int] = Field(default=None, ge=256, le=32000)
+
+    @field_validator("llm_max_tokens", mode="before")
+    @classmethod
+    def _blank_means_unset(cls, v):
+        """`LLM_MAX_TOKENS=` with nothing after it means "use the defaults".
+
+        Leaving an optional key blank is the obvious thing to do, and pydantic
+        would otherwise refuse to parse "" as an int and take the whole app
+        down at import time over a setting nobody needed.
+        """
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
     # --- CORS ---
     # `NoDecode` is load-bearing. Without it pydantic-settings sees a list-typed

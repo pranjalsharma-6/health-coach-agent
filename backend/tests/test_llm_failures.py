@@ -13,6 +13,7 @@ import pytest
 
 from app.agent import graph
 from app.agent.llm import describe_llm_failure
+from app.core.config import settings
 from app.tools.check_llm import (
     looks_like_a_chat_model,
     parameter_count_b,
@@ -296,3 +297,116 @@ class TestRecommendation:
     )
     def test_parameter_count_parsing(self, name, expected):
         assert parameter_count_b(name) == expected
+
+
+class TestOutputBudgets:
+    """`max_tokens` is a reservation, not a cap you can leave generous.
+
+    Providers count the output space you reserve against your per-minute token
+    limit. An 8000-token reservation against an 8000 TPM free tier meant every
+    call was over the limit before the prompt was counted, and the run failed
+    with 413 six times in a row. The budgets below are sized to what each
+    schema actually produces.
+    """
+
+    # Groq's free tier at the time of writing. The point of the number is that
+    # the fan-out has to fit inside *some* stated limit, not this exact one.
+    FREE_TIER_TPM = 8000
+
+    # Measured from the real builders, rounded up.
+    NUTRITIONIST_PROMPT = 1250
+    TRAINER_PROMPT = 600
+
+    def test_the_concurrent_fan_out_fits_the_free_tier(self):
+        """Both specialists run in one superstep, so their reservations land in
+        the same rate-limit window and have to be budgeted together."""
+        from app.agent.llm import budget_for
+        from app.models.plan import MealPlanDraft, TrainingPlanDraft
+
+        total = (
+            self.NUTRITIONIST_PROMPT
+            + budget_for(MealPlanDraft)
+            + self.TRAINER_PROMPT
+            + budget_for(TrainingPlanDraft)
+        )
+        assert total <= self.FREE_TIER_TPM, (
+            f"the fan-out reserves {total} tokens against a {self.FREE_TIER_TPM} "
+            "limit — every run will fail with 413"
+        )
+
+    def test_no_single_budget_exceeds_the_limit_alone(self):
+        from app.agent.llm import MAX_OUTPUT_TOKENS
+
+        for name, budget in MAX_OUTPUT_TOKENS.items():
+            assert budget < self.FREE_TIER_TPM, f"{name} alone exceeds the limit"
+
+    def test_the_trainer_gets_less_than_the_nutritionist(self):
+        """Seven activities against seven days of meals with macros. Giving
+        them the same reservation is what wasted the budget."""
+        from app.agent.llm import budget_for
+        from app.models.plan import MealPlanDraft, TrainingPlanDraft
+
+        assert budget_for(TrainingPlanDraft) < budget_for(MealPlanDraft)
+
+    def test_an_unknown_schema_gets_a_conservative_default(self):
+        from app.agent.llm import DEFAULT_MAX_OUTPUT_TOKENS, budget_for
+
+        class SomethingNew:
+            pass
+
+        assert budget_for(SomethingNew) == DEFAULT_MAX_OUTPUT_TOKENS
+
+    def test_llm_max_tokens_caps_every_budget(self, monkeypatch):
+        """The escape hatch for a key on a tighter limit than the defaults
+        assume."""
+        from app.agent.llm import budget_for
+        from app.core.config import settings
+        from app.models.plan import MealPlanDraft, PlanCritique
+
+        monkeypatch.setattr(settings, "llm_max_tokens", 900)
+
+        assert budget_for(MealPlanDraft) == 900
+        # A budget already below the ceiling is left alone rather than raised.
+        assert budget_for(PlanCritique) == 700
+
+    def test_the_client_is_cached_per_budget(self, monkeypatch):
+        """One client per distinct budget, not one per call — the budget is a
+        constructor argument, so a single cached client cannot serve both."""
+        import app.agent.llm as llm_module
+
+        built = []
+
+        class FakeChat:
+            def __init__(self, **kwargs):
+                built.append(kwargs["max_tokens"])
+
+        monkeypatch.setattr(settings, "groq_api_key", "gsk_test")
+        monkeypatch.setattr(settings, "openai_api_key", "")
+        llm_module.reset_cache()
+
+        import sys
+        import types
+
+        fake = types.ModuleType("langchain_groq")
+        fake.ChatGroq = FakeChat
+        monkeypatch.setitem(sys.modules, "langchain_groq", fake)
+
+        llm_module.get_llm(3500)
+        llm_module.get_llm(3500)   # cached
+        llm_module.get_llm(1000)   # different budget, new client
+
+        assert built == [3500, 1000]
+        llm_module.reset_cache()
+
+
+class TestRequestTooLarge:
+    def test_413_is_not_retried(self):
+        """It is deterministic inside the rate-limit window: the same request
+        fails identically, so three attempts produce three failures and no
+        information. It was retried, which is why the timeline showed six."""
+        failure = describe_llm_failure(ProviderError("too large", 413))
+        assert failure.retryable is False
+
+    def test_413_names_the_setting_that_fixes_it(self):
+        failure = describe_llm_failure(ProviderError("too large", 413))
+        assert "LLM_MAX_TOKENS" in failure.message
