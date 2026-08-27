@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AgentRunner } from "@/components/AgentRunner";
 import { MealCard } from "@/components/MealCard";
+import { MetricsLogger } from "@/components/MetricsLogger";
+import { WeightChart } from "@/components/WeightChart";
 import {
   Alert,
   Badge,
@@ -33,6 +35,7 @@ import type {
   Plan,
   Profile,
   TargetsResponse,
+  WeightPoint,
 } from "@/lib/types";
 
 interface DashboardData {
@@ -42,6 +45,7 @@ interface DashboardData {
   log: DailyLog;
   snapshot: AdherenceSnapshot;
   events: AgentEvent[];
+  weights: WeightPoint[];
 }
 
 export default function DashboardPage() {
@@ -54,6 +58,7 @@ export default function DashboardPage() {
   const [log, setLog] = useState<DailyLog | null>(null);
   const [snapshot, setSnapshot] = useState<AdherenceSnapshot | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [weights, setWeights] = useState<WeightPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [agentPrompt, setAgentPrompt] = useState<string | null>(null);
@@ -62,15 +67,17 @@ export default function DashboardPage() {
   /** Fetch everything the dashboard needs. Pure IO — touches no state. */
   const fetchDashboard = useCallback(async (): Promise<DashboardData> => {
     // One round trip's worth of latency instead of six.
-    const [profile, targets, plan, log, snapshot, events] = await Promise.all([
-      api.profile.get(),
-      api.profile.targets(),
-      api.plans.active(),
-      api.logs.today(),
-      api.logs.adherence(),
-      api.agent.events(),
-    ]);
-    return { profile, targets, plan, log, snapshot, events };
+    const [profile, targets, plan, log, snapshot, events, weights] =
+      await Promise.all([
+        api.profile.get(),
+        api.profile.targets(),
+        api.plans.active(),
+        api.logs.today(),
+        api.logs.adherence(),
+        api.agent.events(),
+        api.logs.weight(),
+      ]);
+    return { profile, targets, plan, log, snapshot, events, weights };
   }, []);
 
   const applyDashboard = useCallback((data: DashboardData) => {
@@ -80,6 +87,7 @@ export default function DashboardPage() {
     setLog(data.log);
     setSnapshot(data.snapshot);
     setEvents(data.events);
+    setWeights(data.weights);
     setError(null);
   }, []);
 
@@ -371,6 +379,45 @@ export default function DashboardPage() {
                   prompt={agentPrompt}
                 />
               </div>
+            </Card>
+
+            <Card>
+              <CardHeader
+                title="Progress"
+                subtitle="Your real weigh-ins — nothing simulated."
+              />
+              <WeightChart
+                points={weights}
+                targetKg={profile?.target_weight_kg ?? null}
+              />
+            </Card>
+
+            <Card>
+              <CardHeader
+                title="Today's numbers"
+                subtitle="Steps and sleep feed straight into Kaya's decision."
+              />
+              <MetricsLogger
+                today={log}
+                onSaved={(updated) => {
+                  setLog(updated);
+                  // Reflect a new weigh-in in the chart without a full reload.
+                  if (updated.weight_kg != null) {
+                    setWeights((prev) => {
+                      const others = prev.filter(
+                        (p) => p.date !== updated.log_date,
+                      );
+                      return [
+                        ...others,
+                        {
+                          date: updated.log_date,
+                          weight_kg: updated.weight_kg as number,
+                        },
+                      ].sort((a, b) => a.date.localeCompare(b.date));
+                    });
+                  }
+                }}
+              />
             </Card>
 
             <Card>
