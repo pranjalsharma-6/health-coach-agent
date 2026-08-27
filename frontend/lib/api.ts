@@ -137,7 +137,15 @@ function extractDetail(body: unknown, status: number): string {
 
   if (body && typeof body === "object" && "detail" in body) {
     const detail = (body as { detail: unknown }).detail;
-    if (typeof detail === "string") return detail;
+    if (typeof detail === "string") {
+      // The backend attaches `reason` outside production — a specific,
+      // actionable cause. Showing only `detail` would hide the one line that
+      // says what to fix.
+      const reason = (body as { reason?: unknown }).reason;
+      return typeof reason === "string" && reason
+        ? `${detail} ${reason}`
+        : detail;
+    }
     if (Array.isArray(detail)) {
       return detail
         .map((item) => {

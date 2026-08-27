@@ -2,8 +2,9 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes import agent, auth, logs, plans, profile
 from app.core.config import settings
@@ -50,6 +51,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(mongo.DatabaseUnavailableError)
+async def _database_unavailable(_: Request, exc: mongo.DatabaseUnavailableError):
+    """Answer 503 with the reason rather than 500 with a traceback.
+
+    The database being down is not a fault in the endpoint that happened to
+    touch it, and a caller can act on "the server cannot reach its database"
+    where it cannot act on "Internal Server Error".
+    """
+    logger.error("Request failed — database unavailable: %s", exc)
+
+    content = {"detail": "The server cannot reach its database."}
+    if not settings.is_production:
+        # The reason names configuration problems, which is exactly what you
+        # want on your own machine and nothing a stranger needs. In production
+        # it stays in the logs, where the loud startup banner already put it.
+        content["reason"] = str(exc)
+
+    return JSONResponse(status_code=503, content=content)
+
+
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(profile.router, prefix="/api/v1")
 app.include_router(plans.router, prefix="/api/v1")
@@ -76,6 +97,14 @@ async def health() -> dict:
     """
     db_status = await mongo.health_check()
     healthy = db_status.get("status") == "healthy"
+
+    if not healthy:
+        # health_check() reports the live probe; connection_error() remembers why
+        # startup failed. On a bad URI there is no client to probe at all, so
+        # without this the response says "disconnected" and nothing more.
+        reason = mongo.connection_error()
+        if reason and not settings.is_production:
+            db_status = {**db_status, "reason": reason}
 
     return {
         "status": "healthy" if healthy else "degraded",

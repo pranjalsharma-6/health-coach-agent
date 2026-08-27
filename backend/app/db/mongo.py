@@ -13,7 +13,7 @@ Streamlit version:
 from typing import Optional
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pymongo.errors import PyMongoError
+from pymongo.errors import InvalidURI, PyMongoError
 from pymongo.server_api import ServerApi
 
 from app.core.config import settings
@@ -24,13 +24,80 @@ logger = get_logger(__name__)
 _client: Optional[AsyncIOMotorClient] = None
 _database: Optional[AsyncIOMotorDatabase] = None
 
+# Why the last connection attempt failed, so /health and any request that needs
+# the database can say something better than "not connected".
+_connection_error: Optional[str] = None
+
+
+class DatabaseUnavailableError(RuntimeError):
+    """The database is needed for this request and isn't connected.
+
+    Distinct from a bare RuntimeError so the API layer can answer 503 with the
+    reason instead of a 500 and a stack trace — a dependency being down is not
+    a bug in the endpoint.
+    """
+
+
+# Characters that carry meaning in the userinfo part of a URI and so must be
+# percent-encoded inside a username or password.
+_MUST_ENCODE = {
+    ":": "%3A",
+    "/": "%2F",
+    "?": "%3F",
+    "#": "%23",
+    "[": "%5B",
+    "]": "%5D",
+    "@": "%40",
+}
+
+
+def describe_credential_problem(uri: str) -> Optional[str]:
+    """Explain an unescaped-credentials error in terms of what to change.
+
+    pymongo says "must be escaped according to RFC 3986", which is accurate and
+    unusable. This names the offending characters and their replacements.
+
+    It never returns the password itself — only which characters appear in it —
+    because the result is written to logs.
+    """
+    if "://" not in uri:
+        return None
+
+    _, _, rest = uri.partition("://")
+    if "@" not in rest:
+        return None
+
+    # rsplit: the *last* @ separates credentials from the host, so a password
+    # containing @ — the whole reason we are here — still splits correctly.
+    userinfo, _, _ = rest.rpartition("@")
+    username, _, password = userinfo.partition(":")
+
+    problems = []
+    for label, value in (("username", username), ("password", password)):
+        found = sorted({c for c in value if c in _MUST_ENCODE})
+        if found:
+            fixes = ", ".join(f"{c} -> {_MUST_ENCODE[c]}" for c in found)
+            problems.append(f"{label} contains {fixes}")
+
+    if not problems:
+        return None
+
+    return (
+        "MONGODB_URI has unescaped characters in the credentials: "
+        + "; ".join(problems)
+        + ". Replace them in the .env value. Leave the @ that separates the "
+        "password from the hostname alone — only the one *inside* the "
+        "password gets encoded."
+    )
+
 
 async def connect_to_mongo() -> None:
     """Open the connection pool and verify it. Called on app startup."""
-    global _client, _database
+    global _client, _database, _connection_error
 
     if not settings.mongodb_uri:
-        logger.error("MONGODB_URI is not set — database features will fail.")
+        _connection_error = "MONGODB_URI is not set in the environment."
+        _fail_loudly(_connection_error)
         return
 
     try:
@@ -49,12 +116,50 @@ async def connect_to_mongo() -> None:
         _database = _client[settings.mongodb_db_name]
         logger.info("Connected to MongoDB (db=%s)", settings.mongodb_db_name)
 
+        _connection_error = None
         await _ensure_indexes()
 
-    except PyMongoError as exc:
-        logger.error("MongoDB connection failed: %s", exc)
+    except InvalidURI as exc:
+        # The connection string itself is malformed — almost always a password
+        # with a special character in it, pasted straight from Atlas.
+        hint = describe_credential_problem(settings.mongodb_uri)
+        _connection_error = hint or str(exc)
+        _fail_loudly(_connection_error, detail=str(exc) if hint else None)
         _client = None
         _database = None
+
+    except PyMongoError as exc:
+        _connection_error = str(exc)
+        _fail_loudly(
+            f"Could not reach MongoDB: {exc}",
+            detail=(
+                "If the credentials are right, check Atlas > Network Access "
+                "allows your current IP address."
+            ),
+        )
+        _client = None
+        _database = None
+
+
+def _fail_loudly(message: str, detail: Optional[str] = None) -> None:
+    """Make a fatal startup problem impossible to scroll past.
+
+    Uvicorn prints "Application startup complete" regardless, so a single ERROR
+    line above it reads like a warning about something that recovered. It has
+    not recovered: every request that touches the database will fail.
+    """
+    logger.error("=" * 72)
+    logger.error("DATABASE UNAVAILABLE - the API started but cannot serve data")
+    logger.error("")
+    for line in message.split(". "):
+        if line.strip():
+            logger.error("  %s", line.strip().rstrip(".") + ".")
+    if detail:
+        logger.error("")
+        logger.error("  (%s)", detail)
+    logger.error("")
+    logger.error("  Fix backend/.env, then save any .py file to reload.")
+    logger.error("=" * 72)
 
 
 async def close_mongo_connection() -> None:
@@ -74,10 +179,16 @@ def get_database() -> AsyncIOMotorDatabase:
     instead of hitting an AttributeError three frames deep.
     """
     if _database is None:
-        raise RuntimeError(
-            "Database is not connected. Check MONGODB_URI and the startup logs."
+        raise DatabaseUnavailableError(
+            _connection_error
+            or "Database is not connected. Check MONGODB_URI and the startup logs."
         )
     return _database
+
+
+def connection_error() -> Optional[str]:
+    """Why the last connection attempt failed, if it did."""
+    return _connection_error
 
 
 def is_connected() -> bool:
