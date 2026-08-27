@@ -13,7 +13,11 @@ import pytest
 
 from app.agent import graph
 from app.agent.llm import describe_llm_failure
-from app.tools.check_llm import looks_like_a_chat_model
+from app.tools.check_llm import (
+    looks_like_a_chat_model,
+    parameter_count_b,
+    rank_for_structured_output,
+)
 from app.models.enums import DietType
 from tests.factories import make_log, make_meal_draft, make_profile, make_targets
 
@@ -230,3 +234,65 @@ class TestModelListFilter:
     def test_drops_the_ones_that_cannot_hold_a_conversation(self, name):
         """Speech, embedding and moderation models pad the list with noise."""
         assert not looks_like_a_chat_model(name)
+
+
+# The exact list returned by a real Groq key, August 2026. Kept verbatim rather
+# than idealised, because both bugs below only appeared against real data.
+REAL_GROQ_LIST = [
+    "allam-2-7b",
+    "canopylabs/orpheus-arabic-saudi",
+    "canopylabs/orpheus-v1-english",
+    "groq/compound",
+    "groq/compound-mini",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
+    "qwen/qwen3.8-27b",
+]
+
+
+class TestRecommendation:
+    """The tool recommended a 7B Arabic model over a 120B general one.
+
+    Not because of any judgement about capability — it took the first entry of
+    an alphabetically sorted list, and "allam" sorts before "openai". Following
+    that advice produces three failed generation attempts and an error message
+    that blames the plan.
+    """
+
+    @staticmethod
+    def _candidates():
+        return rank_for_structured_output(
+            [m for m in REAL_GROQ_LIST if looks_like_a_chat_model(m)]
+        )
+
+    def test_recommends_the_largest_model(self):
+        assert self._candidates()[0] == "openai/gpt-oss-120b"
+
+    def test_does_not_recommend_a_small_model(self):
+        assert self._candidates()[0] != "allam-2-7b"
+
+    def test_speech_models_are_excluded(self):
+        """`orpheus` carries none of the usual giveaways — no "tts", no
+        "whisper" — so it was offered as a candidate for meal planning."""
+        candidates = self._candidates()
+        assert not [c for c in candidates if "orpheus" in c]
+
+    def test_unsized_models_sort_last(self):
+        """An unlabelled name is not evidence of capability. Sorting it first
+        would reintroduce the original bug by a different route."""
+        ranked = self._candidates()
+        assert ranked.index("groq/compound") > ranked.index("allam-2-7b")
+
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("openai/gpt-oss-120b", 120.0),
+            ("qwen/qwen3.8-27b", 27.0),   # the 3.8 is a version, not a size
+            ("allam-2-7b", 7.0),
+            ("groq/compound", 0.0),
+            ("mixtral-8x7b", 7.0),
+        ],
+    )
+    def test_parameter_count_parsing(self, name, expected):
+        assert parameter_count_b(name) == expected

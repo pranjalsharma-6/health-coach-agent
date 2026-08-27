@@ -11,6 +11,7 @@ may already be out of date.
 """
 
 import asyncio
+import re
 import sys
 
 import httpx
@@ -36,11 +37,45 @@ def looks_like_a_chat_model(name: str) -> bool:
     """Filter out speech, embedding and moderation models.
 
     The list is long and mostly irrelevant — you want the ones that can hold a
-    conversation and return structured output.
+    conversation and return structured output. `orpheus` and `canopylabs` are
+    here because a real run listed speech models whose names contain none of
+    the obvious giveaways, and they were offered as candidates for planning.
     """
     lowered = name.lower()
-    skip = ("whisper", "tts", "embed", "guard", "distil", "playai")
+    skip = (
+        "whisper",
+        "tts",
+        "embed",
+        "guard",
+        "distil",
+        "playai",
+        "orpheus",
+        "canopylabs",
+    )
     return not any(term in lowered for term in skip)
+
+
+def parameter_count_b(name: str) -> float:
+    """Billions of parameters as advertised in the model's name, else 0.
+
+    Crude, and the only signal actually available from a list of names. It is
+    enough for the decision at hand: the agent needs structured JSON, small
+    models are unreliable at it, and picking a 7B over a 120B is the difference
+    between a plan and three failed attempts.
+    """
+    matches = re.findall(r"(\d+(?:\.\d+)?)\s*b\b", name.lower())
+    return max((float(m) for m in matches), default=0.0)
+
+
+def rank_for_structured_output(names: list[str]) -> list[str]:
+    """Best candidate first.
+
+    Sorted by advertised size, largest first. Models that publish no size sort
+    last rather than first — an unlabelled name is not evidence of capability,
+    and the previous behaviour (alphabetical) recommended a 7B Arabic model
+    over a 120B general one purely because 'a' sorts before 'o'.
+    """
+    return sorted(names, key=lambda n: (-parameter_count_b(n), n))
 
 
 async def main() -> int:
@@ -78,7 +113,9 @@ async def main() -> int:
         _print("Check your internet connection or any proxy/firewall.")
         return 1
 
-    chat_models = [m for m in models if looks_like_a_chat_model(m)]
+    chat_models = rank_for_structured_output(
+        [m for m in models if looks_like_a_chat_model(m)]
+    )
 
     if settings.llm_model in models:
         _print(f"OK — '{settings.llm_model}' is available. Nothing to change.")
@@ -89,18 +126,24 @@ async def main() -> int:
     _print(f"PROBLEM — '{settings.llm_model}' is NOT available on this key.")
     _print("This is what produces the 404 / NotFoundError in the run timeline.")
     _print()
-    _print("Chat models your key CAN use:")
+    _print("Chat models your key CAN use, most capable first:")
     _print()
     for name in chat_models:
-        _print(f"    {name}")
+        size = parameter_count_b(name)
+        note = f"{size:g}B" if size else "size not stated"
+        _print(f"    {name:38} {note}")
     _print()
-    _print("Pick one and set it in backend/.env:")
+
     if chat_models:
+        _print("Set this in backend/.env:")
         _print()
         _print(f"    LLM_MODEL={chat_models[0]}")
-    _print()
-    _print("Prefer a large instruction-tuned model — the agent asks for")
-    _print("structured JSON, and small models are unreliable at it.")
+        _print()
+        _print("Ranked by advertised parameter count. The agent asks for")
+        _print("structured JSON and small models are unreliable at it, so the")
+        _print("largest option is the right default even if it is slower.")
+    else:
+        _print("No usable chat models found on this key.")
     return 1
 
 
