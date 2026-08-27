@@ -193,6 +193,84 @@ class HealthPlan(BaseModel):
     daily_plans: List[DailyPlan]
 
 
+# --------------------------------------------------------------------------- #
+# Specialist outputs
+#
+# The plan is produced by three narrower agents rather than one. Splitting the
+# schemas is what makes that possible: each specialist returns only its own
+# slice, so its prompt carries only the constraints relevant to that slice and
+# its output stays small enough to generate reliably.
+# --------------------------------------------------------------------------- #
+
+
+class DayMeals(BaseModel):
+    """One day's meals, without the training."""
+
+    day: int = Field(description="Day number, starting at 1.")
+    theme: Optional[str] = Field(
+        default=None, description="Optional short theme, e.g. 'High protein, low prep'."
+    )
+    meals: List[MealItem]
+
+
+class MealPlanDraft(BaseModel):
+    """The nutritionist's output."""
+
+    plan_title: str = Field(
+        description="Short motivational title, e.g. 'Week 1: Protein First'."
+    )
+    reasoning: str = Field(
+        description=(
+            "Two to three sentences on why these meals, referencing the user's "
+            "diet type, goal and any recent adherence signals."
+        )
+    )
+    days: List[DayMeals]
+
+
+class DayTraining(BaseModel):
+    """One day's activity, without the food."""
+
+    day: int = Field(description="Day number, starting at 1.")
+    activity: ActivityItem
+
+
+class TrainingPlanDraft(BaseModel):
+    """The trainer's output."""
+
+    reasoning: str = Field(
+        description=(
+            "Two to three sentences on why this training week is shaped this "
+            "way — the split, the progression, and where recovery sits."
+        )
+    )
+    days: List[DayTraining]
+
+
+class PlanCritique(BaseModel):
+    """The critic's review of the assembled plan.
+
+    Advisory only, and deliberately downstream of nothing: the deterministic
+    validator still runs afterwards and has the final say. A model that approves
+    an unsafe plan must not be able to make it safe.
+    """
+
+    approved: bool = Field(
+        description="True if the plan is coherent and needs no revision."
+    )
+    issues: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Specific, actionable problems — a missing rest day, leg training "
+            "the morning after a long run, elaborate cooking on the user's "
+            "busiest days. Empty when approved."
+        ),
+    )
+    summary: str = Field(
+        description="One sentence the user could read, explaining the verdict."
+    )
+
+
 class PlanInDB(MongoModel):
     """A stored plan version.
 

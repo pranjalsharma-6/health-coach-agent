@@ -49,20 +49,57 @@ Concretely — you mark lunch as skipped:
 
 ## What makes it more than a prompt wrapper
 
-### The agent is a real state machine
+### Three specialists, not one generalist
 
 ```
-sense ──► evaluate ──► decide ──┬─(no action)─────────────────► record ──► END
-                                │
-                                └─(plan needed)──► generate ──► validate
-                                                       ▲            │
-                                                       │            ├─(valid)──► persist ──► END
-                                                       └─(retry)────┘
+sense ─► evaluate ─► decide ─┬─(no action)──────────────────────► record ─► END
+                             │
+                             └─(plan needed)─► start_generation
+                                                 │         │
+                                      ┌──────────┘         └──────────┐
+                                      ▼                              ▼
+                                 nutritionist                     trainer
+                                      └──────────┐         ┌──────────┘
+                                                 ▼         ▼
+                                                 assemble
+                                                    │
+                                                    ▼
+                                                 critique
+                                      ┌─────────────┤
+                              (revise)│             │(ok)
+                                      │             ▼
+                                      │          validate
+                                      │             │
+                                      ├─────────────┤(retry)
+                                      │             ├─(valid)────► persist ─► END
+                                      │             └─(exhausted)► record ──► END
+                                      └──► nutritionist
 ```
 
-`decide` branches four ways from computed evidence. `validate` routes *backwards* to
-`generate`, handing the model the specific errors that got its plan rejected. That cycle
-is the difference between an agent and a function call.
+A **nutritionist** plans food and a **trainer** plans movement, concurrently, each seeing
+only the constraints its own half needs — the trainer never receives diet rules or macro
+targets, and is told never to prescribe food. Splitting them keeps each prompt short and
+each structured output small, and small structured outputs are the reliable ones. Because
+they fan out in the same LangGraph superstep, the week is drafted in roughly the time one
+call takes rather than two.
+
+A **critic** then reads the assembled week for problems only visible once the halves are
+combined — the heaviest session landing on the lightest calorie day, no genuine rest day,
+elaborate cooking stacked on the busiest days. It gets exactly one revision round; a
+reviewer allowed to keep asking would spend the user's time on diminishing preferences.
+
+Two edges run *backwards*, which is what makes this an agent rather than a pipeline: from
+`critique` when the reviewer objects, and from `validate` when a plan is rejected. Each
+carries specific feedback, so the next attempt is a correction rather than a reroll. A
+retry redraws only the meals — the validator inspects food, so food is what a rejection is
+about, and regenerating a training week that was fine costs a call for nothing.
+
+![The specialists working, streamed live](docs/screenshots/multiagent-timeline.png)
+
+**The ordering of the last two stages is the safety property.** The critic is a language
+model and only advises; `validate` is deterministic and has the final say. A model that
+approves an unsafe plan must not be able to make it safe — and there's a test that holds
+that line.
 
 ### Deterministic guardrails wrap LLM judgment
 
@@ -125,7 +162,7 @@ agent never ran" are different states, and the UI shows which one you're in.
 |---|---|---|
 | Frontend | Next.js 16, TypeScript, Tailwind v4 | Real routing, SSE streaming, deploys to Vercel without a cold boot |
 | Backend | FastAPI, async | Native Pydantic — the same models the agent speaks — plus generated OpenAPI docs |
-| Agent | LangGraph | The graph *is* the documentation of the behaviour |
+| Agent | LangGraph | Concurrent specialists, cyclic revision — the graph *is* the documentation of the behaviour |
 | LLM | Groq / Llama 3.3 70B | Fast and free, behind a provider interface — swapping to GPT-4o is a config change |
 | Database | MongoDB (Motor) | Plans are deeply nested, schema-evolving documents |
 | Auth | JWT + bcrypt | Stateless, multi-tenant, no cookie/CSRF machinery |
@@ -169,7 +206,7 @@ Open <http://localhost:3000>.
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-python -m pytest -q          # 287 tests
+python -m pytest -q          # 301 tests
 python -m evals.run          # agent evaluation report
 ```
 
@@ -198,14 +235,14 @@ The suite has three layers:
 ```
 backend/
   app/
-    agent/        LangGraph workflow, prompts, output validation, LLM provider
+    agent/        LangGraph workflow, specialist prompts, validation, LLM provider
     api/routes/   auth · profile · plans · logs · agent
     core/         config, security, logging
     db/           Mongo lifecycle + repositories
     models/       Pydantic domain models and enums
     services/     nutrition math, adherence evaluation, ingredient table
   evals/          agent evaluation suite (decisions + validator detection)
-  tests/          287 tests — examples, properties, API integration, evals
+  tests/          301 tests — examples, properties, API integration, evals
 frontend/
   app/            landing · login · register · onboarding · dashboard
   components/     agent runner, meal cards, UI primitives
@@ -249,7 +286,7 @@ Render + Vercel + Atlas setup.
 - [x] Per-ingredient gram quantities, so recipe macros are computed and verified
 - [ ] Google Fit / Fitbit OAuth for passive sensing
 - [ ] Weekly email digests
-- [ ] Multi-agent split: nutritionist + trainer + critic
+- [x] Multi-agent split: nutritionist + trainer + critic, fanned out concurrently
 
 ---
 

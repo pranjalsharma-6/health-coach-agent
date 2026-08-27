@@ -503,18 +503,56 @@ class TestMeta:
 # Helpers
 # --------------------------------------------------------------------------- #
 def _stub_llm(monkeypatch, *plans: HealthPlan) -> None:
-    """Replace the structured LLM with one that returns fixed plans in order.
+    """Replace each specialist's LLM with one returning fixed output.
 
-    The last plan repeats if the agent asks for more attempts than provided.
+    Takes whole `HealthPlan`s for readability at the call site, then splits each
+    into the nutritionist's and trainer's halves — the graph asks for those two
+    schemas separately now. The last plan repeats if the agent takes more
+    attempts than provided.
     """
-    queue = list(plans)
+    from app.models.plan import (
+        DayMeals,
+        DayTraining,
+        MealPlanDraft,
+        PlanCritique,
+        TrainingPlanDraft,
+    )
+
+    meal_queue = [
+        MealPlanDraft(
+            plan_title=plan.plan_title,
+            reasoning=plan.agent_reasoning,
+            days=[
+                DayMeals(day=d.day, theme=d.theme, meals=d.meals)
+                for d in plan.daily_plans
+            ],
+        )
+        for plan in plans
+    ]
+    training = TrainingPlanDraft(
+        reasoning="Alternating strength and easy movement with a mid-week rest day.",
+        days=[
+            DayTraining(day=d.day, activity=d.activity)
+            for d in plans[0].daily_plans
+        ],
+    )
+    approving_critic = PlanCritique(
+        approved=True, issues=[], summary="The week is coherent."
+    )
 
     class StubStructuredLLM:
+        def __init__(self, schema):
+            self._schema = schema
+
         async def ainvoke(self, _messages):
-            return queue.pop(0) if len(queue) > 1 else queue[0]
+            if self._schema is TrainingPlanDraft:
+                return training
+            if self._schema is PlanCritique:
+                return approving_critic
+            return meal_queue.pop(0) if len(meal_queue) > 1 else meal_queue[0]
 
     monkeypatch.setattr(
-        "app.agent.graph.get_structured_llm", lambda _schema: StubStructuredLLM()
+        "app.agent.graph.get_structured_llm", lambda schema: StubStructuredLLM(schema)
     )
     monkeypatch.setattr("app.agent.llm.is_configured", lambda: True)
     monkeypatch.setattr("app.api.routes.agent.is_configured", lambda: True)

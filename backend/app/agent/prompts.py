@@ -6,56 +6,17 @@ arithmetic. Calorie and macro targets arrive pre-computed from
 explaining itself, not deciding what the numbers should be.
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from app.models.enums import AgentDecision, Cuisine, DietType, Goal, MealType
 from app.models.log import AdherenceSnapshot
-from app.models.plan import NutritionTargets, PlanInDB
+from app.models.plan import HealthPlan, NutritionTargets, PlanInDB
 from app.models.profile import ProfileInDB
 from app.services.ingredients import protein_reference_block
 
 # --------------------------------------------------------------------------- #
 # Static guidance
 # --------------------------------------------------------------------------- #
-
-SYSTEM_PROMPT = """You are Kaya, an expert nutrition and fitness coach.
-
-You design practical, culturally appropriate meal and activity plans that people \
-actually follow. You are not a medical professional and you never diagnose.
-
-## Non-negotiable rules
-
-1. NEVER contradict the calorie and macro targets you are given. They were computed \
-from validated equations with safety limits applied. Treat them as fixed.
-2. NEVER suggest a food the user's diet type forbids. This is the single most \
-important constraint — a plan the user cannot eat is worthless.
-3. NEVER include an allergen the user has listed. Not as a main ingredient, not as \
-a garnish, not as an optional extra.
-4. Meals must be REALISTIC for the user's cooking skill, prep time and budget.
-5. Every meal's macros must be plausible for the portion described. Do not claim \
-40g of protein from a bowl of rice.
-6. If the user has medical notes, respect them and suggest professional consultation \
-where warranted — but still produce the plan.
-
-## What makes a good plan
-
-- **Variety without complexity.** Repeat 2-3 staple breakfasts across the week; \
-people don't cook seven different breakfasts.
-- **Front-load protein.** Hitting the protein target is the hardest part of most \
-plans, especially vegetarian ones. Distribute it across every meal rather than \
-loading it into dinner.
-- **Real, named dishes.** "Rajma chawal with a side of cucumber raita", not \
-"protein source with complex carbohydrate".
-- **Honest effort.** If the user has 15 minutes, plan 15-minute food.
-- **Progressive activity.** Build intensity across the week and include at least \
-one genuine rest day.
-
-## Tone
-
-Warm, direct, specific. You are a coach, not a chatbot. Never lecture about \
-willpower. When someone slips, adjust the plan — don't moralise about it.
-"""
-
 
 # --------------------------------------------------------------------------- #
 # Constraint blocks
@@ -232,45 +193,6 @@ def _meal_slots(meals_per_day: int) -> str:
 # --------------------------------------------------------------------------- #
 # Mode-specific instructions
 # --------------------------------------------------------------------------- #
-
-
-def build_user_prompt(
-    profile: ProfileInDB,
-    targets: NutritionTargets,
-    decision: AgentDecision,
-    snapshot: Optional[AdherenceSnapshot] = None,
-    current_plan: Optional[PlanInDB] = None,
-    trigger_detail: str = "",
-    duration_days: int = 7,
-) -> str:
-    """Assemble the full user-turn prompt for the requested planning mode."""
-    sections = [
-        build_constraints_block(profile),
-        "",
-        build_targets_block(targets, profile.meals_per_day),
-        "",
-        f"## USER",
-        f"- {profile.age_years}y {profile.gender}, {profile.height_cm}cm, "
-        f"{profile.current_weight_kg}kg (BMI {profile.bmi})",
-        f"- Goal: {profile.goal}"
-        + (
-            f", targeting {profile.target_weight_kg}kg over "
-            f"{profile.target_timeline_weeks} weeks"
-            if profile.target_weight_kg
-            else ""
-        ),
-        f"- Activity level: {profile.activity_level}",
-        "",
-    ]
-
-    if snapshot is not None:
-        sections.extend([_build_evidence_block(snapshot), ""])
-
-    sections.append(_build_task_block(
-        decision, profile, current_plan, trigger_detail, duration_days
-    ))
-
-    return "\n".join(sections)
 
 
 def _build_evidence_block(snapshot: AdherenceSnapshot) -> str:
@@ -466,3 +388,254 @@ protein**.
 Rewrite the recipe with portion sizes that genuinely reach those figures. If the
 protein is short, increase the protein-dense ingredient rather than scaling
 everything up — that would overshoot the calories. Keep every quantity in grams."""
+
+
+# --------------------------------------------------------------------------- #
+# Specialist prompts
+#
+# One generalist prompt had to carry diet rules, macro targets, training
+# programming and tone all at once. Splitting it lets each specialist see only
+# what it needs, which keeps each prompt short and each output small — and small
+# structured outputs are the reliable ones.
+# --------------------------------------------------------------------------- #
+
+NUTRITIONIST_SYSTEM_PROMPT = """You are Kaya's nutritionist. You plan food, and \
+only food — another specialist handles training, so never mention exercise.
+
+## Non-negotiable rules
+
+1. NEVER contradict the calorie and macro targets you are given. They were \
+computed from validated equations with safety limits applied. Treat them as fixed.
+2. NEVER suggest a food the user's diet type forbids. A plan the user cannot eat \
+is worthless.
+3. NEVER include an allergen the user has listed — not as a main ingredient, not \
+as a garnish, not as an optional extra.
+4. Meals must be REALISTIC for the user's cooking skill, prep time and budget.
+5. Every meal's macros must be plausible for the portion described. Do not claim \
+40g of protein from a bowl of rice.
+
+## What makes a good week of food
+
+- **Variety without complexity.** Repeat 2-3 staple breakfasts; nobody cooks \
+seven different ones.
+- **Front-load protein.** It's the hardest target to hit, especially on \
+vegetarian and vegan diets. Spread it across every meal rather than loading \
+dinner.
+- **Real, named dishes.** "Rajma chawal with cucumber raita", not "protein \
+source with complex carbohydrate".
+- **Honest effort.** If the user has 15 minutes, plan 15-minute food.
+
+Warm, direct, specific. Never lecture about willpower."""
+
+
+TRAINER_SYSTEM_PROMPT = """You are Kaya's strength and conditioning coach. You \
+plan training, and only training — another specialist handles food, so never \
+prescribe meals, calories or macros.
+
+## Programming rules
+
+1. **Match the goal.** Fat loss keeps resistance training to protect lean mass. \
+Muscle gain needs progressive overload. Endurance needs volume with recovery.
+2. **At least one genuine rest day** in seven. Two if the user is sedentary or \
+their adherence is poor.
+3. **Never stack conflicting sessions.** Heavy lower-body work should not sit the \
+day after a long run, and two high-intensity days should not be consecutive.
+4. **Start where the user actually is.** A sedentary beginner gets walking and \
+bodyweight work, not a five-day split. A session they complete beats one they \
+skip.
+5. **Progress within the week** — build intensity or volume across the block, \
+then taper into the rest day.
+6. **Respect the signals.** Low step counts or poor sleep mean less volume, not \
+more discipline.
+
+Set a realistic daily step target alongside each session. For a rest day, say \
+so plainly and set duration to 0."""
+
+
+CRITIC_SYSTEM_PROMPT = """You are Kaya's reviewer. Two specialists have each \
+planned their half of a week — one the food, one the training — without seeing \
+the other's work. Your job is to catch what neither could.
+
+You are looking for problems that only appear when the halves are put together, \
+or that span the whole week:
+
+- Training and food pulling in opposite directions — a heavy session on the \
+lowest-calorie day, or leg work the morning after a long run.
+- No genuine rest day, or two hard days back to back.
+- Elaborate cooking stacked on days the user is also training hardest.
+- The week ignoring something visible in the user's recent behaviour.
+- Meals or sessions that simply repeat with no progression across the block.
+
+## How to judge
+
+Approve unless something is genuinely wrong. A plan that is merely not what you \
+would have written is fine — churn costs the user a slower response and gains \
+them nothing.
+
+Do NOT re-check arithmetic. Calorie totals, macro reconciliation, diet \
+compliance and allergens are verified separately by code that does not make \
+mistakes. Flagging them here wastes a revision round.
+
+When you reject, every issue must be specific and actionable: name the day and \
+what to change. "Day 4 pairs the week's heaviest squat session with its lowest \
+calorie day — move the session to day 5" is useful. "Could be better balanced" \
+is not."""
+
+
+def build_nutritionist_prompt(
+    profile: ProfileInDB,
+    targets: NutritionTargets,
+    decision: AgentDecision,
+    snapshot: Optional[AdherenceSnapshot] = None,
+    current_plan: Optional[PlanInDB] = None,
+    trigger_detail: str = "",
+    duration_days: int = 7,
+) -> str:
+    """The food half of the plan."""
+    sections = [
+        build_constraints_block(profile),
+        "",
+        build_targets_block(targets, profile.meals_per_day),
+        "",
+        _build_user_block(profile),
+        "",
+    ]
+
+    if snapshot is not None:
+        sections.extend([_build_evidence_block(snapshot), ""])
+
+    sections.append(
+        _build_task_block(
+            decision, profile, current_plan, trigger_detail, duration_days
+        )
+    )
+    return "\n".join(sections)
+
+
+def build_trainer_prompt(
+    profile: ProfileInDB,
+    decision: AgentDecision,
+    snapshot: Optional[AdherenceSnapshot] = None,
+    trigger_detail: str = "",
+    duration_days: int = 7,
+) -> str:
+    """The training half of the plan.
+
+    Deliberately not given the meal plan: the specialists run in parallel, and
+    the critic reconciles them afterwards. Serialising them to share context
+    would double the latency to remove a class of conflict the critic already
+    catches.
+    """
+    goal = Goal(profile.goal)
+
+    sections = [
+        "## TRAINING BRIEF",
+        "",
+        _build_user_block(profile),
+        f"- Activity level: {profile.activity_level}",
+        f"- Goal framing: {_GOAL_FRAMING[goal]}",
+        "",
+    ]
+
+    if profile.medical_notes:
+        sections.extend(
+            [f"**Medical notes — programme around these:** {profile.medical_notes}", ""]
+        )
+
+    if snapshot is not None:
+        sections.extend([_build_evidence_block(snapshot), ""])
+
+    if trigger_detail:
+        sections.extend([f"**Why you're being asked:** {trigger_detail}", ""])
+
+    if decision == AgentDecision.STRUCTURAL_REPLAN:
+        sections.append(
+            "This is a restructure, not a refresh. If sessions were being missed, "
+            "cut the volume rather than repeating it with more encouragement.\n"
+        )
+
+    sections.append(
+        f"""## OUTPUT REQUIREMENTS
+
+- Exactly **{duration_days} days**, numbered 1 to {duration_days}.
+- One activity per day. Rest days are activities too — name them plainly and set
+  `duration_minutes` to 0.
+- `reasoning` is two to three sentences on the shape of the week: the split, the
+  progression, and where recovery sits."""
+    )
+    return "\n".join(sections)
+
+
+def build_critic_prompt(
+    profile: ProfileInDB,
+    plan: HealthPlan,
+    snapshot: Optional[AdherenceSnapshot] = None,
+) -> str:
+    """Ask the reviewer to judge the assembled week."""
+    lines = [
+        "## THE USER",
+        "",
+        _build_user_block(profile),
+        f"- Diet: {DietType(profile.diet_type).label}",
+        f"- Cooking: {profile.cooking_skill}, up to {profile.max_prep_minutes} min a meal",
+        f"- Eats out ~{profile.eat_out_per_week}x a week",
+        "",
+    ]
+
+    if profile.medical_notes:
+        lines.extend([f"- Medical notes: {profile.medical_notes}", ""])
+
+    if snapshot is not None:
+        lines.extend([_build_evidence_block(snapshot), ""])
+
+    lines.extend([f"## THE PLAN — {plan.plan_title}", ""])
+
+    for day in plan.daily_plans:
+        total_kcal = sum(m.calories_kcal for m in day.meals)
+        meals = "; ".join(f"{m.meal_type.value}: {m.name}" for m in day.meals)
+        lines.append(
+            f"**Day {day.day}** ({total_kcal} kcal) — "
+            f"{day.activity.activity_type}, {day.activity.duration_minutes} min "
+            f"({day.activity.intensity}). {meals}"
+        )
+
+    lines.extend(
+        [
+            "",
+            "Review the week as a whole. Approve it unless something is genuinely "
+            "wrong; if you reject, name the day and the change in every issue.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_critique_feedback(issues: List[str]) -> str:
+    """Turn the critic's findings into a revision instruction."""
+    lines = [
+        "A reviewer read the assembled week and asked for changes.",
+        "",
+    ]
+    lines.extend(f"{i}. {issue}" for i, issue in enumerate(issues, start=1))
+    lines.extend(
+        [
+            "",
+            "Regenerate your half of the plan addressing every point that applies "
+            "to it. Ignore any that concern the other specialist's work.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_user_block(profile: ProfileInDB) -> str:
+    """The one-line physical description both specialists need."""
+    target = (
+        f", targeting {profile.target_weight_kg}kg over "
+        f"{profile.target_timeline_weeks} weeks"
+        if profile.target_weight_kg
+        else ""
+    )
+    return (
+        f"- {profile.age_years}y {profile.gender}, {profile.height_cm}cm, "
+        f"{profile.current_weight_kg}kg (BMI {profile.bmi})\n"
+        f"- Goal: {profile.goal}{target}"
+    )

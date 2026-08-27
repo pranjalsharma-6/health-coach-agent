@@ -1,19 +1,33 @@
 """Agent state — the data that flows through the LangGraph workflow."""
 
+import operator
 from datetime import date
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 from app.models.enums import AgentDecision
 from app.models.log import AdherenceSnapshot, DailyLogInDB
-from app.models.plan import HealthPlan, NutritionTargets, PlanInDB
+from app.models.plan import (
+    HealthPlan,
+    MealPlanDraft,
+    NutritionTargets,
+    PlanCritique,
+    PlanInDB,
+    TrainingPlanDraft,
+)
 from app.models.profile import ProfileInDB
 
 
 class AgentState(TypedDict, total=False):
     """State passed between nodes.
 
-    `total=False` because nodes populate it progressively — `snapshot` doesn't
-    exist until `evaluate` runs, `saved_plan` not until `persist`.
+    Every node returns a **partial** update — only the keys it actually changed —
+    rather than the whole dict. That isn't a style preference: the nutritionist
+    and the trainer run concurrently, and LangGraph's default channel rejects two
+    writes to the same key within one superstep. Two nodes each returning the
+    full state would collide on every key they share.
+
+    `total=False` because keys appear progressively: `snapshot` doesn't exist
+    until `evaluate` runs, `saved_plan` not until `persist`.
     """
 
     # --- Input ---
@@ -35,7 +49,18 @@ class AgentState(TypedDict, total=False):
     decision: AgentDecision
     trigger_detail: str
 
-    # --- Populated by generate / validate ---
+    # --- Populated by the specialists, concurrently ---
+    meal_draft: Optional[MealPlanDraft]
+    training_draft: Optional[TrainingPlanDraft]
+
+    # --- Populated by critique ---
+    # Named `critique_result` rather than `critique`: LangGraph forbids a state
+    # key sharing a name with a node, and the node reads better as `critique`.
+    critique_result: Optional[PlanCritique]
+    critique_feedback: str
+    critique_rounds: int
+
+    # --- Populated by assemble / validate ---
     generated_plan: Optional[HealthPlan]
     validation_errors: List[str]
     validation_warnings: List[str]
@@ -46,7 +71,9 @@ class AgentState(TypedDict, total=False):
     saved_plan: Optional[PlanInDB]
 
     # --- Throughout ---
-    steps: List[Dict[str, Any]]
+    # Concatenated rather than overwritten, so both concurrent specialists can
+    # record their progress without one clobbering the other.
+    steps: Annotated[List[Dict[str, Any]], operator.add]
     error: Optional[str]
 
 
@@ -64,6 +91,11 @@ def new_state(user_id: str, today: date, force_replan: bool = False) -> AgentSta
         snapshot=None,
         decision=AgentDecision.NO_ACTION,
         trigger_detail="",
+        meal_draft=None,
+        training_draft=None,
+        critique_result=None,
+        critique_feedback="",
+        critique_rounds=0,
         generated_plan=None,
         validation_errors=[],
         validation_warnings=[],
@@ -75,19 +107,17 @@ def new_state(user_id: str, today: date, force_replan: bool = False) -> AgentSta
     )
 
 
-def record_step(
-    state: AgentState, node: str, status: str, message: str, **extra: Any
-) -> None:
-    """Append a step to the run trace.
+def step(node: str, status: str, message: str, **extra: Any) -> Dict[str, Any]:
+    """Build one entry for the run trace.
 
-    This trace is what gets streamed to the browser, so the user watches the
-    agent reason instead of staring at a spinner — and it's what makes the
-    agent's behaviour auditable after the fact.
+    Nodes collect these locally and return them under `steps`, where the reducer
+    concatenates. Returning steps rather than mutating shared state is what lets
+    two nodes record progress in the same superstep.
+
+    The trace is streamed to the browser, so the user watches the agent reason
+    instead of staring at a spinner — and it's what makes a run auditable
+    afterwards.
     """
-    step: Dict[str, Any] = {
-        "node": node,
-        "status": status,
-        "message": message,
-    }
-    step.update(extra)
-    state.setdefault("steps", []).append(step)
+    entry: Dict[str, Any] = {"node": node, "status": status, "message": message}
+    entry.update(extra)
+    return entry

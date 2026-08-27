@@ -1,37 +1,66 @@
 """The LangGraph planning agent.
 
-    sense ──► evaluate ──► decide ──┬─(no_action)──────────────► record ──► END
-                                    │
-                                    └─(plan needed)──► generate ──► validate
-                                                          ▲            │
-                                                          │            ├─(valid)──► persist ──► END
-                                                          └─(retry)────┘
-                                                                       └─(exhausted)► record ──► END
+    sense ─► evaluate ─► decide ─┬─(no action)─────────────────────► record ─► END
+                                 │
+                                 └─(plan needed)─► start_generation
+                                                     │         │
+                                          ┌──────────┘         └──────────┐
+                                          ▼                              ▼
+                                    plan_meals                     plan_training
+                                          └──────────┐         ┌──────────┘
+                                                     ▼         ▼
+                                                     assemble
+                                                        │
+                                                        ▼
+                                                     critique
+                                          ┌─────────────┤
+                                  (revise)│             │(ok / spent)
+                                          │             ▼
+                                          │          validate
+                                          │             │
+                                          ├─────────────┤(retry)
+                                          │             ├─(valid)────► persist ─► END
+                                          │             └─(exhausted)► record ──► END
+                                          └──► plan_meals
 
-Two things make this a real state machine rather than decoration:
+Three things make this a real state machine rather than decoration:
 
 1. `decide` genuinely branches — four outcomes, chosen from computed evidence,
    producing structurally different actions.
-2. `validate` can send control *backwards* to `generate`. That cycle is how a
-   rejected plan gets regenerated with specific corrective feedback.
+2. Two specialists run **concurrently** in the same superstep. A nutritionist
+   plans food and a trainer plans movement, each seeing only the constraints
+   its own half needs, so neither prompt has to carry the other's. Splitting
+   them keeps each output small, and small structured outputs are the reliable
+   ones.
+3. Control flows *backwards* twice — from `critique` and from `validate` — so a
+   plan gets revised with specific feedback rather than regenerated blind.
+
+The ordering of the last two matters: the critic is an LLM and only advises,
+while `validate` is deterministic and has the final say. A model that approves
+an unsafe plan must not be able to make it safe.
 """
 
 import time
 from datetime import date
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
 from app.agent.llm import LLMUnavailableError, get_llm, get_structured_llm
 from app.agent.prompts import (
+    CRITIC_SYSTEM_PROMPT,
+    NUTRITIONIST_SYSTEM_PROMPT,
     RECIPE_SYSTEM_PROMPT,
-    SYSTEM_PROMPT,
+    TRAINER_SYSTEM_PROMPT,
+    build_critic_prompt,
+    build_critique_feedback,
+    build_nutritionist_prompt,
     build_recipe_correction,
     build_recipe_prompt,
-    build_user_prompt,
+    build_trainer_prompt,
 )
-from app.agent.state import AgentState, new_state, record_step
+from app.agent.state import AgentState, new_state, step
 from app.agent.validators import build_retry_feedback, validate_plan
 from app.core.logging import get_logger
 from app.db.repositories import (
@@ -42,7 +71,16 @@ from app.db.repositories import (
 )
 from app.models.enums import AgentDecision
 from app.models.log import AgentEventInDB
-from app.models.plan import HealthPlan, PlanInDB, Recipe
+from app.models.plan import (
+    ActivityItem,
+    DailyPlan,
+    HealthPlan,
+    MealPlanDraft,
+    PlanCritique,
+    PlanInDB,
+    Recipe,
+    TrainingPlanDraft,
+)
 from app.models.profile import ProfileInDB
 from app.services.adherence import (
     STRUCTURAL_ADHERENCE_THRESHOLD,
@@ -57,6 +95,10 @@ logger = get_logger(__name__)
 MAX_GENERATION_ATTEMPTS = 3
 PLAN_DURATION_DAYS = 7
 
+# The critic gets one revision round. Allowed to keep asking, it would spend
+# the user's time on diminishing preferences.
+MAX_CRITIQUE_ROUNDS = 1
+
 # Skipping meals this many days running means the plan doesn't fit their life.
 STRUCTURAL_SKIP_STREAK = 3
 
@@ -70,44 +112,43 @@ CALORIE_OVERAGE_TRIGGER = 1.15
 # --------------------------------------------------------------------------- #
 # Node: sense
 # --------------------------------------------------------------------------- #
-async def sense_node(state: AgentState) -> AgentState:
+async def sense_node(state: AgentState) -> Dict[str, Any]:
     """Gather everything the agent needs to reason about."""
     user_id = state["user_id"]
-    record_step(state, "sense", "running", "Gathering your profile and recent logs…")
 
     profile = await ProfileRepository.get(user_id)
     if profile is None:
-        state["error"] = "No profile found. Complete onboarding first."
-        record_step(state, "sense", "error", state["error"])
-        return state
+        message = "No profile found. Complete onboarding first."
+        return {"error": message, "steps": [step("sense", "error", message)]}
 
-    state["profile"] = profile
-    state["targets"] = calculate_targets(profile)
-    state["active_plan"] = await PlanRepository.get_active(user_id)
-    state["today_log"] = await LogRepository.get_or_create(user_id, state["today"])
-    state["recent_logs"] = await LogRepository.get_recent(user_id, days=7)
+    active_plan = await PlanRepository.get_active(user_id)
+    today_log = await LogRepository.get_or_create(user_id, state["today"])
+    recent_logs = await LogRepository.get_recent(user_id, days=7)
 
-    record_step(
-        state,
-        "sense",
-        "done",
-        (
-            f"Loaded profile ({profile.diet_type}, {profile.goal}) and "
-            f"{len(state['recent_logs'])} days of logs."
-        ),
-    )
-    return state
+    return {
+        "profile": profile,
+        "targets": calculate_targets(profile),
+        "active_plan": active_plan,
+        "today_log": today_log,
+        "recent_logs": recent_logs,
+        "steps": [
+            step(
+                "sense",
+                "done",
+                f"Loaded profile ({profile.diet_type}, {profile.goal}) and "
+                f"{len(recent_logs)} days of logs.",
+            )
+        ],
+    }
 
 
 # --------------------------------------------------------------------------- #
 # Node: evaluate
 # --------------------------------------------------------------------------- #
-async def evaluate_node(state: AgentState) -> AgentState:
+async def evaluate_node(state: AgentState) -> Dict[str, Any]:
     """Compute the adherence snapshot. Pure arithmetic — no LLM."""
     if state.get("error"):
-        return state
-
-    record_step(state, "evaluate", "running", "Measuring how you're tracking…")
+        return {}
 
     snapshot = build_snapshot(
         target_date=state["today"],
@@ -116,44 +157,34 @@ async def evaluate_node(state: AgentState) -> AgentState:
         today_log=state.get("today_log"),
         recent_logs=state.get("recent_logs", []),
     )
-    state["snapshot"] = snapshot
-
-    record_step(state, "evaluate", "done", describe_snapshot(snapshot))
-    return state
+    return {
+        "snapshot": snapshot,
+        "steps": [step("evaluate", "done", describe_snapshot(snapshot))],
+    }
 
 
 # --------------------------------------------------------------------------- #
 # Node: decide
 # --------------------------------------------------------------------------- #
-async def decide_node(state: AgentState) -> AgentState:
+async def decide_node(state: AgentState) -> Dict[str, Any]:
     """Choose the action, deterministically, from the snapshot.
 
     Deliberately not an LLM call. The decision to intervene in someone's diet
     should be reproducible and explainable, and the rules below are both. The
-    LLM is brought in afterwards to *execute* the decision, not to make it.
+    specialists are brought in afterwards to *execute* the decision, not to
+    make it.
     """
     if state.get("error"):
-        return state
+        return {}
 
-    record_step(state, "decide", "running", "Deciding whether to change your plan…")
-
-    snapshot = state["snapshot"]
-    plan: Optional[PlanInDB] = state.get("active_plan")
-    targets = state["targets"]
-
-    decision, detail = _choose_action(state, snapshot, plan, targets)
-
-    state["decision"] = decision
-    state["trigger_detail"] = detail
-
-    record_step(
-        state,
-        "decide",
-        "done",
-        detail,
-        decision=decision.value,
+    decision, detail = _choose_action(
+        state, state["snapshot"], state.get("active_plan"), state["targets"]
     )
-    return state
+    return {
+        "decision": decision,
+        "trigger_detail": detail,
+        "steps": [step("decide", "done", detail, decision=decision.value)],
+    }
 
 
 def _choose_action(state, snapshot, plan, targets) -> tuple[AgentDecision, str]:
@@ -240,24 +271,37 @@ def _choose_action(state, snapshot, plan, targets) -> tuple[AgentDecision, str]:
 # --------------------------------------------------------------------------- #
 # Node: generate
 # --------------------------------------------------------------------------- #
-async def generate_node(state: AgentState) -> AgentState:
-    """Call the LLM to produce a plan."""
+
+
+# --------------------------------------------------------------------------- #
+# Nodes: the specialists
+# --------------------------------------------------------------------------- #
+async def start_generation_node(state: AgentState) -> Dict[str, Any]:
+    """Fan-out point for the specialists.
+
+    Exists so a conditional edge has one node to target while two plain edges
+    spread the work — LangGraph then runs both specialists in the same
+    superstep, drafting food and training concurrently rather than in sequence.
+    """
     if state.get("error"):
-        return state
+        return {}
+    return {"attempt": state.get("attempt", 0) + 1}
 
-    state["attempt"] = state.get("attempt", 0) + 1
-    attempt = state["attempt"]
 
+async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
+    """The nutritionist: the food half of the week."""
+    if state.get("error"):
+        return {}
+
+    attempt = state.get("attempt", 1)
     label = (
-        "Writing your plan…"
+        "Nutritionist is choosing your meals…"
         if attempt == 1
-        else f"Revising the plan (attempt {attempt}) to fix validation problems…"
+        else f"Nutritionist is revising the meals (attempt {attempt})…"
     )
-    record_step(state, "generate", "running", label, attempt=attempt)
 
     profile: ProfileInDB = state["profile"]
-
-    user_prompt = build_user_prompt(
+    prompt = build_nutritionist_prompt(
         profile=profile,
         targets=state["targets"],
         decision=state["decision"],
@@ -266,159 +310,357 @@ async def generate_node(state: AgentState) -> AgentState:
         trigger_detail=state.get("trigger_detail", ""),
         duration_days=PLAN_DURATION_DAYS,
     )
-
-    if state.get("retry_feedback"):
-        user_prompt += "\n\n---\n\n" + state["retry_feedback"]
+    for extra in (state.get("retry_feedback"), state.get("critique_feedback")):
+        if extra:
+            prompt += "\n\n---\n\n" + extra
 
     try:
-        structured = get_structured_llm(HealthPlan)
         started = time.perf_counter()
-        plan: HealthPlan = await structured.ainvoke(
+        draft: MealPlanDraft = await get_structured_llm(MealPlanDraft).ainvoke(
             [
-                SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=user_prompt),
+                SystemMessage(content=NUTRITIONIST_SYSTEM_PROMPT),
+                HumanMessage(content=prompt),
             ]
         )
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
-
-        state["generated_plan"] = plan
-        record_step(
-            state,
-            "generate",
-            "done",
-            f'Drafted "{plan.plan_title}" ({len(plan.daily_plans)} days).',
-            duration_ms=elapsed_ms,
-        )
+        return {
+            "meal_draft": draft,
+            "steps": [
+                step("plan_meals", "running", label, attempt=attempt),
+                step(
+                    "plan_meals",
+                    "done",
+                    f'Drafted "{draft.plan_title}" — {len(draft.days)} days of meals.',
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                ),
+            ],
+        }
 
     except LLMUnavailableError as exc:
-        state["error"] = str(exc)
-        record_step(state, "generate", "error", str(exc))
+        return {"error": str(exc), "steps": [step("plan_meals", "error", str(exc))]}
 
     except Exception as exc:
-        # A malformed structured-output response lands here. Let the retry edge
-        # handle it rather than failing the whole run on the first attempt.
-        logger.exception("Plan generation failed on attempt %s", attempt)
-        state["generated_plan"] = None
-        state["validation_errors"] = [f"Generation failed: {type(exc).__name__}"]
-        state["retry_feedback"] = (
-            "Your previous response could not be parsed into the required schema. "
-            "Return valid structured output matching the schema exactly."
-        )
-        record_step(
-            state,
-            "generate",
-            "error",
-            f"Generation attempt {attempt} failed: {type(exc).__name__}",
-        )
+        logger.exception("Meal planning failed on attempt %s", attempt)
+        return {
+            "meal_draft": None,
+            "retry_feedback": (
+                "Your previous response could not be parsed into the required "
+                "schema. Return valid structured output matching it exactly."
+            ),
+            "steps": [
+                step(
+                    "plan_meals",
+                    "error",
+                    f"Meal drafting failed: {type(exc).__name__}",
+                )
+            ],
+        }
 
-    return state
+
+async def plan_training_node(state: AgentState) -> Dict[str, Any]:
+    """The trainer: the movement half of the week.
+
+    Runs without sight of the meal plan. The critic reconciles the two
+    afterwards — serialising them to share context would double the latency to
+    remove a class of conflict the critic already catches.
+    """
+    if state.get("error"):
+        return {}
+
+    # Training rarely causes a validation failure — the validator only inspects
+    # food — so a retry reuses the existing draft rather than paying for it again.
+    if state.get("training_draft") is not None and not state.get("critique_feedback"):
+        return {}
+
+    profile: ProfileInDB = state["profile"]
+    prompt = build_trainer_prompt(
+        profile=profile,
+        decision=state["decision"],
+        snapshot=state.get("snapshot"),
+        trigger_detail=state.get("trigger_detail", ""),
+        duration_days=PLAN_DURATION_DAYS,
+    )
+    if state.get("critique_feedback"):
+        prompt += "\n\n---\n\n" + state["critique_feedback"]
+
+    try:
+        started = time.perf_counter()
+        draft: TrainingPlanDraft = await get_structured_llm(
+            TrainingPlanDraft
+        ).ainvoke(
+            [
+                SystemMessage(content=TRAINER_SYSTEM_PROMPT),
+                HumanMessage(content=prompt),
+            ]
+        )
+        rest_days = sum(1 for d in draft.days if d.activity.duration_minutes == 0)
+        return {
+            "training_draft": draft,
+            "steps": [
+                step("plan_training", "running", "Trainer is building your week…"),
+                step(
+                    "plan_training",
+                    "done",
+                    f"Planned {len(draft.days)} days, {rest_days} of them rest.",
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                ),
+            ],
+        }
+
+    except LLMUnavailableError as exc:
+        return {"error": str(exc), "steps": [step("plan_training", "error", str(exc))]}
+
+    except Exception as exc:
+        logger.exception("Training planning failed")
+        return {
+            "training_draft": None,
+            "steps": [
+                step(
+                    "plan_training",
+                    "error",
+                    f"Training drafting failed: {type(exc).__name__}",
+                )
+            ],
+        }
+
+
+async def assemble_node(state: AgentState) -> Dict[str, Any]:
+    """Zip the two halves into one plan."""
+    if state.get("error"):
+        return {}
+
+    meals: Optional[MealPlanDraft] = state.get("meal_draft")
+    training: Optional[TrainingPlanDraft] = state.get("training_draft")
+
+    if meals is None:
+        return {
+            "generated_plan": None,
+            "validation_errors": ["The nutritionist produced no meals."],
+        }
+
+    by_day = {d.day: d.activity for d in (training.days if training else [])}
+    fallback = ActivityItem(
+        activity_type="Rest",
+        duration_minutes=0,
+        intensity="low",
+        description="Recovery day — the trainer didn't cover this one.",
+        target_steps=6000,
+    )
+
+    daily_plans = [
+        DailyPlan(
+            day=day.day,
+            theme=day.theme,
+            meals=day.meals,
+            # A missing day becomes rest rather than an exception: half a plan
+            # the user can follow beats none at all.
+            activity=by_day.get(day.day, fallback),
+        )
+        for day in meals.days
+    ]
+
+    reasoning = meals.reasoning
+    if training is not None and training.reasoning:
+        reasoning = f"{meals.reasoning} {training.reasoning}"
+
+    plan = HealthPlan(
+        plan_title=meals.plan_title,
+        duration_days=len(daily_plans),
+        agent_reasoning=reasoning,
+        daily_plans=daily_plans,
+    )
+
+    uncovered = [d.day for d in meals.days if d.day not in by_day]
+    message = f"Combined {len(daily_plans)} days of meals and training."
+    if uncovered:
+        message += f" Days {uncovered} had no session — set to rest."
+
+    return {
+        "generated_plan": plan,
+        "validation_errors": [],
+        "steps": [step("assemble", "done", message)],
+    }
+
+
+async def critique_node(state: AgentState) -> Dict[str, Any]:
+    """Review the assembled week for problems only visible once combined.
+
+    Advisory. `validate` runs afterwards and has the final say — a model that
+    approves an unsafe plan must not be able to make it safe.
+    """
+    if state.get("error") or state.get("generated_plan") is None:
+        return {"critique_feedback": ""}
+
+    # One revision round. A critic allowed to keep asking would spend the user's
+    # time on diminishing preferences.
+    if state.get("critique_rounds", 0) >= MAX_CRITIQUE_ROUNDS:
+        return {"critique_feedback": ""}
+
+    try:
+        critique: PlanCritique = await get_structured_llm(PlanCritique).ainvoke(
+            [
+                SystemMessage(content=CRITIC_SYSTEM_PROMPT),
+                HumanMessage(
+                    content=build_critic_prompt(
+                        state["profile"],
+                        state["generated_plan"],
+                        state.get("snapshot"),
+                    )
+                ),
+            ]
+        )
+    except Exception as exc:
+        # The critic is a nicety. Losing it must not cost the user their plan.
+        logger.warning("Critique failed, continuing without it: %s", exc)
+        return {
+            "critique_feedback": "",
+            "steps": [
+                step(
+                    "critique",
+                    "done",
+                    "Review unavailable — continuing to the safety checks.",
+                )
+            ],
+        }
+
+    rounds = state.get("critique_rounds", 0) + 1
+
+    if critique.approved or not critique.issues:
+        return {
+            "critique_result": critique,
+            "critique_rounds": rounds,
+            "critique_feedback": "",
+            "steps": [
+                step("critique", "running", "Reviewer is reading the week…"),
+                step("critique", "done", critique.summary),
+            ],
+        }
+
+    return {
+        "critique_result": critique,
+        "critique_rounds": rounds,
+        "critique_feedback": build_critique_feedback(critique.issues),
+        "steps": [
+            step("critique", "running", "Reviewer is reading the week…"),
+            step(
+                "critique",
+                "failed",
+                f"{critique.summary} ({len(critique.issues)} issue(s) to fix)",
+                errors=critique.issues,
+            ),
+        ],
+    }
 
 
 # --------------------------------------------------------------------------- #
 # Node: validate
 # --------------------------------------------------------------------------- #
-async def validate_node(state: AgentState) -> AgentState:
-    """Check the generated plan against safety and constraint rules."""
+async def validate_node(state: AgentState) -> Dict[str, Any]:
+    """Check the assembled plan against safety and constraint rules."""
     if state.get("error"):
-        return state
+        return {}
 
     plan = state.get("generated_plan")
     if plan is None:
-        # Generation already failed; the retry edge will decide what happens.
-        return state
-
-    record_step(state, "validate", "running", "Checking the plan is safe and on-diet…")
+        # Drafting already failed; the retry edge decides what happens next.
+        return {}
 
     result = validate_plan(plan, state["profile"], state["targets"])
-    state["validation_errors"] = result.errors
-    state["validation_warnings"] = result.warnings
 
     if result.is_valid:
         message = "Plan passed all checks."
         if result.warnings:
             message += f" ({len(result.warnings)} minor note(s).)"
-        record_step(state, "validate", "done", message)
-    else:
-        state["retry_feedback"] = build_retry_feedback(result)
-        record_step(
-            state,
-            "validate",
-            "failed",
-            f"Rejected: {result.errors[0]}"
-            + (
-                f" (+{len(result.errors) - 1} more)"
-                if len(result.errors) > 1
-                else ""
-            ),
-            errors=result.errors,
-        )
+        return {
+            "validation_errors": [],
+            "validation_warnings": result.warnings,
+            "steps": [
+                step("validate", "running", "Checking the plan is safe and on-diet…"),
+                step("validate", "done", message),
+            ],
+        }
 
-    return state
+    extra = f" (+{len(result.errors) - 1} more)" if len(result.errors) > 1 else ""
+    return {
+        "validation_errors": result.errors,
+        "validation_warnings": result.warnings,
+        "retry_feedback": build_retry_feedback(result),
+        "steps": [
+            step("validate", "running", "Checking the plan is safe and on-diet…"),
+            step(
+                "validate",
+                "failed",
+                f"Rejected: {result.errors[0]}{extra}",
+                errors=result.errors,
+            ),
+        ],
+    }
 
 
 # --------------------------------------------------------------------------- #
 # Node: persist
 # --------------------------------------------------------------------------- #
-async def persist_node(state: AgentState) -> AgentState:
+async def persist_node(state: AgentState) -> Dict[str, Any]:
     """Save the validated plan as a new version and record the decision."""
     if state.get("error"):
-        return state
-
-    record_step(state, "persist", "running", "Saving your plan…")
+        return {}
 
     generated: HealthPlan = state["generated_plan"]
     parent = state.get("active_plan")
 
-    plan = PlanInDB(
-        user_id=state["user_id"],
-        plan_title=generated.plan_title,
-        duration_days=len(generated.daily_plans),
-        agent_reasoning=generated.agent_reasoning,
-        daily_plans=generated.daily_plans,
-        targets=state["targets"],
-        trigger=state["decision"],
-        trigger_detail=state.get("trigger_detail"),
-        parent_plan_id=str(parent.id) if parent else None,
+    saved = await PlanRepository.save_new_version(
+        PlanInDB(
+            user_id=state["user_id"],
+            plan_title=generated.plan_title,
+            duration_days=len(generated.daily_plans),
+            agent_reasoning=generated.agent_reasoning,
+            daily_plans=generated.daily_plans,
+            targets=state["targets"],
+            trigger=state["decision"],
+            trigger_detail=state.get("trigger_detail"),
+            parent_plan_id=str(parent.id) if parent else None,
+        )
     )
-
-    saved = await PlanRepository.save_new_version(plan)
-    state["saved_plan"] = saved
 
     await _record_event(state, resulting_plan_id=str(saved.id))
 
-    record_step(
-        state,
-        "persist",
-        "done",
-        f'Saved "{saved.plan_title}" as version {saved.version}.',
-        plan_id=str(saved.id),
-        version=saved.version,
-    )
-    return state
+    return {
+        "saved_plan": saved,
+        "steps": [
+            step("persist", "running", "Saving your plan…"),
+            step(
+                "persist",
+                "done",
+                f'Saved "{saved.plan_title}" as version {saved.version}.',
+                plan_id=str(saved.id),
+                version=saved.version,
+            ),
+        ],
+    }
 
 
 # --------------------------------------------------------------------------- #
 # Node: record (terminal, for runs that produce no plan)
 # --------------------------------------------------------------------------- #
-async def record_node(state: AgentState) -> AgentState:
+async def record_node(state: AgentState) -> Dict[str, Any]:
     """Write the decision to the timeline even when nothing changed.
 
     Recording no-ops matters: it's the difference between "the agent decided
     you're fine" and "the agent didn't run".
     """
     if state.get("error"):
-        record_step(state, "record", "error", state["error"])
-        return state
+        await _record_event(state)
+        return {"steps": [step("record", "error", state["error"])]}
 
     if state["decision"] != AgentDecision.NO_ACTION and not state.get("saved_plan"):
-        state["error"] = (
+        message = (
             "Could not produce a valid plan after "
             f"{state.get('attempt', 0)} attempts. Your existing plan is unchanged."
         )
-        record_step(state, "record", "error", state["error"])
+        await _record_event(state)
+        return {"error": message, "steps": [step("record", "error", message)]}
 
     await _record_event(state)
-    return state
+    return {}
 
 
 async def _record_event(state: AgentState, resulting_plan_id: Optional[str] = None):
@@ -454,11 +696,27 @@ def route_after_decide(state: AgentState) -> str:
     return "generate"
 
 
+def route_after_critique(state: AgentState) -> str:
+    """Send the plan back for revision, or on to the safety checks.
+
+    Only the nutritionist is re-run unless the critic's findings concern the
+    training too — regenerating both halves for a note about meal timing wastes
+    a call and risks churning a training week that was fine.
+    """
+    if state.get("error"):
+        return "validate"
+    if state.get("critique_feedback"):
+        return "revise"
+    return "validate"
+
+
 def route_after_validate(state: AgentState) -> str:
     """Persist, retry, or give up.
 
-    This is the edge that makes the graph cyclic — a rejected plan goes back to
-    `generate` carrying specific feedback about what was wrong with it.
+    The retry edge re-enters at `start_generation`, which bumps the attempt
+    counter and fans out again. `plan_training` short-circuits on a retry, so in
+    practice only the meals are redrawn — the validator inspects food, so food is
+    what a rejection is about.
     """
     if state.get("error"):
         return "record"
@@ -485,7 +743,11 @@ def build_graph():
     workflow.add_node("sense", sense_node)
     workflow.add_node("evaluate", evaluate_node)
     workflow.add_node("decide", decide_node)
-    workflow.add_node("generate", generate_node)
+    workflow.add_node("start_generation", start_generation_node)
+    workflow.add_node("plan_meals", plan_meals_node)
+    workflow.add_node("plan_training", plan_training_node)
+    workflow.add_node("assemble", assemble_node)
+    workflow.add_node("critique", critique_node)
     workflow.add_node("validate", validate_node)
     workflow.add_node("persist", persist_node)
     workflow.add_node("record", record_node)
@@ -498,15 +760,32 @@ def build_graph():
     workflow.add_conditional_edges(
         "decide",
         route_after_decide,
-        {"generate": "generate", "record": "record"},
+        {"generate": "start_generation", "record": "record"},
     )
 
-    workflow.add_edge("generate", "validate")
+    # Two edges out of one node is the fan-out: LangGraph runs both specialists
+    # in the same superstep, then waits for both before `assemble`.
+    workflow.add_edge("start_generation", "plan_meals")
+    workflow.add_edge("start_generation", "plan_training")
+    workflow.add_edge("plan_meals", "assemble")
+    workflow.add_edge("plan_training", "assemble")
+
+    workflow.add_edge("assemble", "critique")
+
+    workflow.add_conditional_edges(
+        "critique",
+        route_after_critique,
+        {"revise": "plan_meals", "validate": "validate"},
+    )
 
     workflow.add_conditional_edges(
         "validate",
         route_after_validate,
-        {"persist": "persist", "generate": "generate", "record": "record"},
+        {
+            "persist": "persist",
+            "generate": "start_generation",
+            "record": "record",
+        },
     )
 
     workflow.add_edge("persist", END)

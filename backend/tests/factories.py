@@ -175,3 +175,75 @@ def make_log(
     return DailyLogInDB(
         user_id="test-user", log_date=log_date, meals=entries, **metrics
     )
+
+
+# --------------------------------------------------------------------------- #
+# Specialist drafts
+# --------------------------------------------------------------------------- #
+def make_meal_draft(
+    targets: NutritionTargets, days: int = 7, meals_per_day: int = 4
+) -> "MealPlanDraft":
+    """The nutritionist's half of a well-formed plan."""
+    from app.models.plan import DayMeals, MealPlanDraft
+
+    return MealPlanDraft(
+        plan_title="Week 1: Protein First",
+        reasoning=(
+            "Built around vegetarian protein anchors because hitting the target "
+            "without meat needs deliberate planning. Meals repeat across the week "
+            "to keep prep under 30 minutes."
+        ),
+        days=[
+            DayMeals(day=d, meals=make_day(d, targets, meals_per_day).meals)
+            for d in range(1, days + 1)
+        ],
+    )
+
+
+def make_training_draft(days: int = 7) -> "TrainingPlanDraft":
+    """The trainer's half — a sane week with one genuine rest day."""
+    from app.models.plan import DayTraining, TrainingPlanDraft
+
+    def activity(day: int) -> ActivityItem:
+        if day == 4:
+            return ActivityItem(
+                activity_type="Rest",
+                duration_minutes=0,
+                intensity="low",
+                description="Full recovery day.",
+                target_steps=6000,
+            )
+        return ActivityItem(
+            activity_type="Strength training — full body"
+            if day % 2
+            else "Brisk walk",
+            duration_minutes=45 if day % 2 else 30,
+            intensity="moderate" if day % 2 else "low",
+            description="Compound lifts, focus on form."
+            if day % 2
+            else "Easy pace, keep it conversational.",
+            target_steps=8000,
+        )
+
+    return TrainingPlanDraft(
+        reasoning=(
+            "Alternating strength and easy movement, with a genuine rest day "
+            "mid-week so the deficit doesn't compound into fatigue."
+        ),
+        days=[DayTraining(day=d, activity=activity(d)) for d in range(1, days + 1)],
+    )
+
+
+def make_critique(approved: bool = True, issues=None) -> "PlanCritique":
+    from app.models.plan import PlanCritique
+
+    issues = list(issues or [])
+    return PlanCritique(
+        approved=approved and not issues,
+        issues=issues,
+        summary=(
+            "The week is coherent and the training fits the deficit."
+            if approved and not issues
+            else "The week needs a few adjustments before it's ready."
+        ),
+    )
