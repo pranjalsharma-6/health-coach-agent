@@ -30,6 +30,22 @@ services:
       - key: MONGODB_DB_NAME
         value: KayaDB
 
+      # Reasoning models spend part of the output budget thinking before they
+      # answer. On a free-tier rate limit that can consume the whole budget and
+      # leave nothing for the structured result, which surfaces as
+      # "tool_use_failed" with an empty generation rather than as a limit.
+      - key: LLM_REASONING_EFFORT
+        value: low
+      # A seven-day plan costs roughly 7500 tokens of an 8000-per-minute free
+      # tier, leaving no room for the retry the agent is designed around.
+      - key: PLAN_DURATION_DAYS
+        value: "4"
+      # LLM_MODEL is deliberately absent: blank means "the provider's default",
+      # which is the only value that stays correct as providers retire models.
+      # Set it here only to pin a specific model, and only one belonging to the
+      # provider whose key is set below — the API refuses a mismatched pair at
+      # startup rather than discovering it mid-run.
+
       # --- Set these in the Render dashboard ---
       - key: MONGODB_URI
         sync: false

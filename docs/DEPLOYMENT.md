@@ -179,6 +179,11 @@ Wrong `MONGODB_URI`, an un-encoded password, or Atlas Network Access missing
 `GROQ_API_KEY` isn't set, or you're being rate-limited. `/health` shows
 `llm_configured` so you can tell those apart.
 
+**The logs say `LLM MISCONFIGURED` at startup, or a run fails naming a model.**
+`LLM_MODEL` is set to a name belonging to a different provider than the key in
+use — a Gemini name with a Groq key, say. The message names both fixes. The
+simplest is to remove `LLM_MODEL` entirely and let the provider default apply.
+
 **The agent retries three times and gives up.**
 The model's plan is failing validation. The streamed timeline names the exact
 rule — usually the protein floor. Either loosen `PROTEIN_TOLERANCE` in
