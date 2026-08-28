@@ -851,3 +851,76 @@ class TestRateLimitWaiting:
         from app.agent.llm import parse_retry_after_seconds
 
         assert parse_retry_after_seconds(text) == expected
+
+
+class TestBudgetsScaleWithPlanLength:
+    """A flat budget is wrong in both directions.
+
+    Sized for a seven-day plan it over-reserves for a four-day one, and
+    providers charge reserved output against the per-minute limit whether it is
+    used or not. The trainer was reserving 1400 tokens to write four days.
+    """
+
+    def test_a_shorter_plan_reserves_less(self, monkeypatch):
+        import app.agent.graph as graph_module
+        from app.agent.llm import budget_for
+        from app.models.plan import TrainingPlanDraft
+
+        monkeypatch.setattr(graph_module, "PLAN_DURATION_DAYS", 7)
+        seven = budget_for(TrainingPlanDraft)
+
+        monkeypatch.setattr(graph_module, "PLAN_DURATION_DAYS", 3)
+        three = budget_for(TrainingPlanDraft)
+
+        assert three < seven
+
+    def test_the_meal_budget_follows_the_chunk_not_the_plan(self, monkeypatch):
+        """The nutritionist drafts a chunk at a time, so a longer plan means
+        more calls, not a bigger one."""
+        import app.agent.graph as graph_module
+        from app.agent.llm import budget_for
+        from app.models.plan import MealPlanDraft
+
+        monkeypatch.setattr(graph_module, "PLAN_DURATION_DAYS", 7)
+        seven = budget_for(MealPlanDraft)
+
+        monkeypatch.setattr(
+            graph_module, "PLAN_DURATION_DAYS", graph_module.MEAL_CHUNK_DAYS
+        )
+        one_chunk = budget_for(MealPlanDraft)
+
+        assert seven == one_chunk
+
+    def test_a_one_day_plan_does_not_reserve_a_week(self, monkeypatch):
+        import app.agent.graph as graph_module
+        from app.agent.llm import budget_for
+        from app.models.plan import MealPlanDraft
+
+        monkeypatch.setattr(graph_module, "PLAN_DURATION_DAYS", 1)
+        assert budget_for(MealPlanDraft) < 1200
+
+    def test_the_ceiling_still_applies(self, monkeypatch):
+        from app.agent.llm import budget_for
+        from app.core.config import settings
+        from app.models.plan import MealPlanDraft
+
+        monkeypatch.setattr(settings, "llm_max_tokens", 700)
+        assert budget_for(MealPlanDraft) == 700
+
+    def test_every_budget_leaves_room_for_the_answer(self, monkeypatch):
+        """Scaling must not shrink a budget below what the output needs.
+
+        Roughly 70 tokens a meal, four meals a day, plus the reasoning field.
+        """
+        import app.agent.graph as graph_module
+        from app.agent.llm import budget_for
+        from app.models.plan import MealPlanDraft
+
+        for days in (1, 3, 4, 7):
+            monkeypatch.setattr(graph_module, "PLAN_DURATION_DAYS", days)
+            chunk = min(graph_module.MEAL_CHUNK_DAYS, days)
+            needed = chunk * 4 * 70 + 150
+
+            assert budget_for(MealPlanDraft) > needed, (
+                f"{days}-day plan: budget too tight for the meals it must hold"
+            )

@@ -25,16 +25,21 @@ logger = get_logger(__name__)
 # reservation exhausted an 8000 TPM free tier before the prompt was counted at
 # all, and every call came back 413. These are sized to what each schema
 # actually produces — a training week is seven activities, not a novel.
+# Output budgets that scale with the work.
+#
+# A flat number is wrong in both directions: sized for a seven-day plan it
+# over-reserves for a four-day one, and providers count reserved output against
+# the per-minute limit whether it is used or not. The trainer was reserving
+# 1400 tokens to write four days of exercises.
+#
+# (per_day, overhead) — overhead covers the reasoning field and JSON scaffolding.
+PER_DAY_OUTPUT_TOKENS: Dict[str, tuple] = {
+    "MealPlanDraft": (350, 500),      # ~4 meals a day, each with macros
+    "TrainingPlanDraft": (170, 400),  # one session a day, 3-4 named exercises
+}
+
 MAX_OUTPUT_TOKENS: Dict[str, int] = {
-    # Per *call*, not per week. The nutritionist drafts the week in chunks, so
-    # this covers one chunk — and the chunks run concurrently, which means both
-    # reservations land in the same rate-limit window and have to be budgeted
-    # together. Leaving this at a whole week's worth reserved 8800 output
-    # tokens against an 8000 TPM tier and brought back the 413 it was raised to
-    # avoid. It also has to cover a reasoning model's thinking tokens, which
-    # are spent before the answer begins.
-    "MealPlanDraft": 1800,      # ~4 days x 4 meals, each with macros
-    "TrainingPlanDraft": 1400,  # 7 days x a session of named exercises
+    # Fallbacks for schemas whose size does not depend on the plan length.
     "PlanCritique": 700,        # a verdict and a short list of issues
     "Recipe": 1200,             # ingredients, steps, tips for one meal
 }
@@ -152,11 +157,30 @@ def budget_for(schema: Any) -> int:
     `LLM_MAX_TOKENS` caps every budget when set, for keys on a tighter rate
     limit than the defaults assume.
     """
-    budget = MAX_OUTPUT_TOKENS.get(
-        getattr(schema, "__name__", ""), DEFAULT_MAX_OUTPUT_TOKENS
-    )
+    name = getattr(schema, "__name__", "")
+
+    scaled = PER_DAY_OUTPUT_TOKENS.get(name)
+    if scaled is not None:
+        per_day, overhead = scaled
+        budget = per_day * _days_per_call(name) + overhead
+    else:
+        budget = MAX_OUTPUT_TOKENS.get(name, DEFAULT_MAX_OUTPUT_TOKENS)
     ceiling = settings.llm_max_tokens
     return min(budget, ceiling) if ceiling else budget
+
+
+def _days_per_call(schema_name: str) -> int:
+    """How many days one call to this specialist has to cover.
+
+    The nutritionist drafts in chunks, so its call covers a chunk; the trainer
+    writes the whole plan in one go. Imported here rather than at module level
+    because the graph imports this module.
+    """
+    from app.agent.graph import MEAL_CHUNK_DAYS, PLAN_DURATION_DAYS
+
+    if schema_name == "MealPlanDraft":
+        return min(MEAL_CHUNK_DAYS, PLAN_DURATION_DAYS)
+    return PLAN_DURATION_DAYS
 
 
 def get_llm(max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> BaseChatModel:
