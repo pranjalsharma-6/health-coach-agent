@@ -163,7 +163,7 @@ agent never ran" are different states, and the UI shows which one you're in.
 | Frontend | Next.js 16, TypeScript, Tailwind v4 | Real routing, SSE streaming, deploys to Vercel without a cold boot |
 | Backend | FastAPI, async | Native Pydantic — the same models the agent speaks — plus generated OpenAPI docs |
 | Agent | LangGraph | Concurrent specialists, cyclic revision — the graph *is* the documentation of the behaviour |
-| LLM | Groq / Llama 3.3 70B | Fast and free, behind a provider interface — swapping to GPT-4o is a config change |
+| LLM | Groq, Gemini or OpenAI | Behind a provider interface — switching is a config change, which is how the free-tier ceiling was escaped |
 | Database | MongoDB (Motor) | Plans are deeply nested, schema-evolving documents |
 | Auth | JWT + bcrypt | Stateless, multi-tenant, no cookie/CSRF machinery |
 
@@ -171,8 +171,12 @@ agent never ran" are different states, and the UI shows which one you're in.
 
 ## Running it locally
 
-**Prerequisites:** Python 3.11+, Node 18+, a MongoDB connection string, and a
-[free Groq API key](https://console.groq.com).
+**Prerequisites:** Python 3.11+, Node 18+, a MongoDB connection string, and one
+LLM key — [Gemini](https://aistudio.google.com/apikey) or
+[Groq](https://console.groq.com), both free.
+
+Run `python -m app.tools.check_llm` to confirm the key works and see which
+models it can reach.
 
 ### Backend
 
@@ -206,7 +210,7 @@ Open <http://localhost:3000>.
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-python -m pytest -q          # 480 tests
+python -m pytest -q          # 493 tests
 python -m evals.run          # agent evaluation report
 ```
 
@@ -242,7 +246,7 @@ backend/
     models/       Pydantic domain models and enums
     services/     nutrition math, adherence evaluation, ingredient table
   evals/          agent evaluation suite (decisions + validator detection)
-  tests/          480 tests — examples, properties, API integration, evals
+  tests/          493 tests — examples, properties, API integration, evals
 frontend/
   app/            landing · login · register · onboarding · dashboard
   components/     agent runner, meal cards, UI primitives

@@ -79,8 +79,17 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
     detail = str(exc).strip()
 
     if status == 404:
+        # The *resolved* model, not the raw setting: LLM_MODEL is blank when
+        # the provider's default is in use, and "The model '' is not available"
+        # helps nobody.
+        provider = resolve_provider()
+        named = (
+            (resolve_model(provider) if provider else settings.llm_model)
+            or "the configured model"
+        )
+
         return LLMFailure(
-            f"The model '{settings.llm_model}' is not available on your API key. "
+            f"The model '{named}' is not available on your API key. "
             "Providers retire models on a rolling basis. Run "
             "`python -m app.tools.check_llm` to list the models your key can "
             "use, then set LLM_MODEL in backend/.env to one of them.",
@@ -197,23 +206,88 @@ def _days_per_call(schema_name: str) -> int:
     return PLAN_DURATION_DAYS
 
 
-def get_llm(max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> BaseChatModel:
-    """Return a cached chat model, preferring Groq.
+# Model names do not travel between providers, so each carries its own
+# default. `LLM_MODEL` overrides whichever is selected.
+DEFAULT_MODELS = {
+    "groq": "openai/gpt-oss-120b",
+    "gemini": "gemini-2.5-flash",
+    "openai": "gpt-4o-mini",
+}
 
-    Groq serves large open models at very low latency on a free tier, which
-    matters for an agent the user watches work in real time.
+
+def resolve_provider() -> Optional[str]:
+    """Which provider to use: the configured one, else whichever key exists.
+
+    Explicit beats implicit — but with one key set, asking someone to also name
+    the provider is a second chance to get it wrong.
     """
+    if settings.llm_provider:
+        return settings.llm_provider
+
+    for name, key in (
+        ("groq", settings.groq_api_key),
+        ("gemini", settings.gemini_api_key),
+        ("openai", settings.openai_api_key),
+    ):
+        if key:
+            return name
+    return None
+
+
+def resolve_model(provider: str) -> str:
+    return settings.llm_model or DEFAULT_MODELS.get(provider, "")
+
+
+def api_key_for(provider: str) -> str:
+    return {
+        "groq": settings.groq_api_key,
+        "gemini": settings.gemini_api_key,
+        "openai": settings.openai_api_key,
+    }.get(provider, "")
+
+
+def get_llm(max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> BaseChatModel:
+    """Return a cached chat model for the configured provider."""
     cached = _llm_by_budget.get(max_tokens)
     if cached is not None:
         return cached
 
-    if settings.groq_api_key:
+    provider = resolve_provider()
+    key = api_key_for(provider) if provider else ""
+
+    if not provider or not key:
+        raise LLMUnavailableError(
+            "No LLM provider configured. Set one of GROQ_API_KEY, "
+            "GEMINI_API_KEY (free at aistudio.google.com) or OPENAI_API_KEY "
+            "in backend/.env"
+        )
+
+    model = resolve_model(provider)
+
+    if provider == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        llm = ChatGoogleGenerativeAI(
+            model=model,
+            temperature=settings.llm_temperature,
+            google_api_key=key,
+            # Gemini spells the output cap differently. Same meaning, same
+            # reservation semantics.
+            max_output_tokens=max_tokens,
+            timeout=90,
+            max_retries=2,
+        )
+        logger.info("LLM provider: Gemini (%s, max_tokens=%s)", model, max_tokens)
+        _llm_by_budget[max_tokens] = llm
+        return llm
+
+    if provider == "groq":
         from langchain_groq import ChatGroq
 
         llm = ChatGroq(
-            model=settings.llm_model,
+            model=model,
             temperature=settings.llm_temperature,
-            api_key=settings.groq_api_key,
+            api_key=key,
             max_tokens=max_tokens,
             timeout=90,
             max_retries=2,
@@ -229,31 +303,23 @@ def get_llm(max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> BaseChatModel:
                 else {}
             ),
         )
-        logger.info(
-            "LLM provider: Groq (%s, max_tokens=%s)", settings.llm_model, max_tokens
-        )
+        logger.info("LLM provider: Groq (%s, max_tokens=%s)", model, max_tokens)
         _llm_by_budget[max_tokens] = llm
         return llm
 
-    if settings.openai_api_key:
-        from langchain_openai import ChatOpenAI
+    from langchain_openai import ChatOpenAI
 
-        llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=settings.llm_temperature,
-            api_key=settings.openai_api_key,
-            max_tokens=max_tokens,
-            timeout=90,
-            max_retries=2,
-        )
-        logger.info("LLM provider: OpenAI (gpt-4o-mini, max_tokens=%s)", max_tokens)
-        _llm_by_budget[max_tokens] = llm
-        return llm
-
-    raise LLMUnavailableError(
-        "No LLM provider configured. Set GROQ_API_KEY (free at console.groq.com) "
-        "or OPENAI_API_KEY in backend/.env"
+    llm = ChatOpenAI(
+        model=model,
+        temperature=settings.llm_temperature,
+        api_key=key,
+        max_tokens=max_tokens,
+        timeout=90,
+        max_retries=2,
     )
+    logger.info("LLM provider: OpenAI (%s, max_tokens=%s)", model, max_tokens)
+    _llm_by_budget[max_tokens] = llm
+    return llm
 
 
 def get_structured_llm(schema: Any) -> Any:
@@ -433,7 +499,8 @@ def build_json_mode_instruction(schema: Any) -> str:
 
 
 def is_configured() -> bool:
-    return bool(settings.groq_api_key or settings.openai_api_key)
+    provider = resolve_provider()
+    return bool(provider and api_key_for(provider))
 
 
 def reset_cache() -> None:

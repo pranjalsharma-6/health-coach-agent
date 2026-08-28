@@ -16,18 +16,36 @@ import sys
 
 import httpx
 
+from app.agent.llm import api_key_for, resolve_model, resolve_provider
 from app.core.config import settings
 
 GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
+GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
 def _print(line: str = "") -> None:
     print(line, flush=True)
 
 
-async def _fetch_models(url: str, key: str) -> list[str]:
+async def _fetch_models(provider: str, key: str) -> list[str]:
+    """List the models this key can reach.
+
+    Gemini takes the key as a query parameter and returns a differently shaped
+    payload, so the two are not interchangeable.
+    """
     async with httpx.AsyncClient(timeout=20) as client:
+        if provider == "gemini":
+            response = await client.get(GEMINI_MODELS_URL, params={"key": key})
+            response.raise_for_status()
+            return sorted(
+                m["name"].removeprefix("models/")
+                for m in response.json().get("models", [])
+                # Only models that can answer a prompt.
+                if "generateContent" in m.get("supportedGenerationMethods", [])
+            )
+
+        url = GROQ_MODELS_URL if provider == "groq" else OPENAI_MODELS_URL
         response = await client.get(url, headers={"Authorization": f"Bearer {key}"})
         response.raise_for_status()
         return sorted(m["id"] for m in response.json().get("data", []))
@@ -82,29 +100,36 @@ async def main() -> int:
     _print("Kaya — LLM configuration check")
     _print("=" * 60)
 
-    if settings.groq_api_key:
-        provider, url, key = "Groq", GROQ_MODELS_URL, settings.groq_api_key
-    elif settings.openai_api_key:
-        provider, url, key = "OpenAI", OPENAI_MODELS_URL, settings.openai_api_key
-    else:
+    provider = resolve_provider()
+    key = api_key_for(provider) if provider else ""
+
+    if not provider or not key:
         _print("No API key found in backend/.env")
-        _print("Set GROQ_API_KEY (free at https://console.groq.com).")
+        _print()
+        _print("Set one of:")
+        _print("  GEMINI_API_KEY  free at https://aistudio.google.com/apikey")
+        _print("  GROQ_API_KEY    free at https://console.groq.com")
+        _print("  OPENAI_API_KEY  paid")
         return 1
+
+    model = resolve_model(provider)
 
     _print(f"Provider      : {provider}")
     _print(f"Key           : {key[:7]}…{key[-4:]} ({len(key)} chars)")
-    _print(f"LLM_MODEL     : {settings.llm_model}")
+    _print(f"Model         : {model}")
+    if not settings.llm_model:
+        _print("                (provider default — set LLM_MODEL to override)")
     _print()
 
     try:
-        models = await _fetch_models(url, key)
+        models = await _fetch_models(provider, key)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         _print(f"The provider rejected the request (HTTP {status}).")
         if status in (401, 403):
             _print()
             _print("The key is not valid. Check backend/.env:")
-            _print("  - a Groq key starts with 'gsk_'")
+            _print("  - a Groq key starts with 'gsk_'; a Gemini key with 'AIza'")
             _print("  - no quotes around the value, no trailing spaces")
             _print("  - generate a fresh one at https://console.groq.com/keys")
         return 1
@@ -117,13 +142,13 @@ async def main() -> int:
         [m for m in models if looks_like_a_chat_model(m)]
     )
 
-    if settings.llm_model in models:
-        _print(f"OK — '{settings.llm_model}' is available. Nothing to change.")
+    if model in models:
+        _print(f"OK — '{model}' is available. Nothing to change.")
         _print()
         _print("If the agent still fails, the problem is not the model name.")
         return 0
 
-    _print(f"PROBLEM — '{settings.llm_model}' is NOT available on this key.")
+    _print(f"PROBLEM — '{model}' is NOT available on this key.")
     _print("This is what produces the 404 / NotFoundError in the run timeline.")
     _print()
     _print("Chat models your key CAN use, most capable first:")

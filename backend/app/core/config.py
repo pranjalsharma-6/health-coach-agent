@@ -31,9 +31,30 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
 
     # --- LLM providers ---
+    # Which provider to use. Leave unset to pick whichever key is present,
+    # which is what most people want and what the tests rely on.
+    llm_provider: Optional[str] = Field(default=None)
+
     groq_api_key: str = Field(default="")
+    gemini_api_key: str = Field(default="")
     openai_api_key: str = Field(default="")
-    llm_model: str = Field(default="llama-3.3-70b-versatile")
+    # Model names are provider-specific — a Groq name means nothing to Gemini.
+    # Leave blank to use the provider's default; `python -m app.tools.check_llm`
+    # lists what your key can actually reach.
+    llm_model: str = Field(default="")
+
+    @field_validator("llm_provider", mode="before")
+    @classmethod
+    def _check_provider(cls, v):
+        if isinstance(v, str):
+            v = v.strip().lower()
+            if not v:
+                return None
+            if v not in {"groq", "openai", "gemini"}:
+                raise ValueError(
+                    "LLM_PROVIDER must be groq, openai or gemini"
+                )
+        return v
     llm_temperature: float = Field(default=0.4)
     # Caps every per-schema output budget. Leave unset to use the defaults in
     # `app/agent/llm.py`; set it when your key's tokens-per-minute limit is

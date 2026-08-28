@@ -155,6 +155,11 @@ class TestNonRetryableFailures:
         )
 
     async def test_the_reason_reaches_the_run_timeline(self, wired, monkeypatch):
+        # A key has to be present for provider resolution to name a model.
+        monkeypatch.setattr(settings, "groq_api_key", "gsk_test")
+        monkeypatch.setattr(settings, "llm_provider", None)
+        monkeypatch.setattr(settings, "llm_model", "")
+
         calls: list = []
         monkeypatch.setattr(
             graph,
@@ -165,7 +170,13 @@ class TestNonRetryableFailures:
         final = await graph.run_agent("u1", today=TODAY)
         messages = " ".join(s["message"] for s in final["steps"])
 
-        assert "llama" in messages.lower(), "the model name should be named"
+        from app.agent.llm import resolve_model, resolve_provider
+
+        model = resolve_model(resolve_provider() or "groq")
+        assert model.lower() in messages.lower(), (
+            "the resolved model should be named — LLM_MODEL is blank when a "
+            "provider default is in use, and naming '' helps nobody"
+        )
         assert "NotFoundError" not in messages, (
             "the exception class name is not a diagnosis"
         )
@@ -1029,3 +1040,141 @@ class TestDailyVersusPerMinuteLimits:
 
         assert parse_retry_after_seconds(self.DAILY) == 90.0  # capped, for sleeping
         assert parse_retry_after_seconds(self.DAILY, cap=None) == 540.864
+
+
+class TestProviderSelection:
+    """Three providers, one abstraction.
+
+    Groq's free tier caps daily tokens at a level a multi-agent planner reaches
+    quickly. Being able to move to another provider is a config change here
+    precisely because nothing outside this module names a vendor.
+    """
+
+    @staticmethod
+    def _only(monkeypatch, **keys):
+        import app.agent.llm as llm_module
+
+        for field in ("groq_api_key", "gemini_api_key", "openai_api_key"):
+            monkeypatch.setattr(settings, field, keys.get(field, ""))
+        monkeypatch.setattr(settings, "llm_provider", keys.get("provider"))
+        monkeypatch.setattr(settings, "llm_model", keys.get("model", ""))
+        llm_module.reset_cache()
+
+    @pytest.mark.parametrize(
+        "field,expected",
+        [
+            ("groq_api_key", "groq"),
+            ("gemini_api_key", "gemini"),
+            ("openai_api_key", "openai"),
+        ],
+    )
+    def test_one_key_needs_no_provider_setting(self, monkeypatch, field, expected):
+        """Asking someone with one key to also name the provider is a second
+        chance to get it wrong."""
+        from app.agent.llm import resolve_provider
+
+        self._only(monkeypatch, **{field: "k"})
+        assert resolve_provider() == expected
+
+    def test_an_explicit_provider_wins(self, monkeypatch):
+        from app.agent.llm import resolve_provider
+
+        self._only(
+            monkeypatch, groq_api_key="g", gemini_api_key="k", provider="gemini"
+        )
+        assert resolve_provider() == "gemini"
+
+    def test_no_key_resolves_to_nothing(self, monkeypatch):
+        from app.agent.llm import is_configured, resolve_provider
+
+        self._only(monkeypatch)
+        assert resolve_provider() is None
+        assert not is_configured()
+
+    def test_a_key_without_its_provider_is_not_configured(self, monkeypatch):
+        """LLM_PROVIDER=gemini with only a Groq key set is a misconfiguration,
+        not a silent fallback to Groq."""
+        from app.agent.llm import is_configured
+
+        self._only(monkeypatch, groq_api_key="g", provider="gemini")
+        assert not is_configured()
+
+    @pytest.mark.parametrize(
+        "provider,fragment",
+        [("groq", "gpt-oss"), ("gemini", "gemini"), ("openai", "gpt-4o")],
+    )
+    def test_each_provider_has_its_own_default_model(self, provider, fragment):
+        """A Groq model name means nothing to Gemini. Sharing one default was
+        how a provider switch silently sent the wrong name."""
+        from app.agent.llm import resolve_model
+
+        assert fragment in resolve_model(provider)
+
+    def test_llm_model_overrides_the_default(self, monkeypatch):
+        from app.agent.llm import resolve_model
+
+        self._only(monkeypatch, gemini_api_key="k", model="gemini-2.0-flash")
+        assert resolve_model("gemini") == "gemini-2.0-flash"
+
+    def test_gemini_is_built_with_its_own_parameter_names(self, monkeypatch):
+        """Gemini spells the output cap `max_output_tokens`, and takes the key
+        as `google_api_key`. Passing Groq's names would fail at construction."""
+        import sys
+        import types
+
+        import app.agent.llm as llm_module
+
+        captured = {}
+
+        class FakeGemini:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        fake = types.ModuleType("langchain_google_genai")
+        fake.ChatGoogleGenerativeAI = FakeGemini
+        monkeypatch.setitem(sys.modules, "langchain_google_genai", fake)
+
+        self._only(monkeypatch, gemini_api_key="AIza-test")
+        llm_module.get_llm(1500)
+
+        assert captured["max_output_tokens"] == 1500
+        assert captured["google_api_key"] == "AIza-test"
+        assert "gemini" in captured["model"]
+        llm_module.reset_cache()
+
+    def test_gemini_is_not_sent_groq_only_parameters(self, monkeypatch):
+        """`reasoning_effort` is a Groq field. Sending it to Gemini is a 400."""
+        import sys
+        import types
+
+        import app.agent.llm as llm_module
+
+        captured = {}
+
+        class FakeGemini:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        fake = types.ModuleType("langchain_google_genai")
+        fake.ChatGoogleGenerativeAI = FakeGemini
+        monkeypatch.setitem(sys.modules, "langchain_google_genai", fake)
+
+        self._only(monkeypatch, gemini_api_key="AIza-test")
+        monkeypatch.setattr(settings, "llm_reasoning_effort", "low")
+        llm_module.get_llm(1500)
+
+        assert "model_kwargs" not in captured
+        assert "reasoning_effort" not in captured
+        llm_module.reset_cache()
+
+    def test_an_unknown_provider_is_rejected_at_startup(self):
+        import os
+
+        from app.core.config import Settings
+
+        os.environ["LLM_PROVIDER"] = "skynet"
+        try:
+            with pytest.raises(Exception, match="groq, openai or gemini"):
+                Settings(_env_file=None)
+        finally:
+            os.environ.pop("LLM_PROVIDER", None)
