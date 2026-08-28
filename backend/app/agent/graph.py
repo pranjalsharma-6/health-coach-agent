@@ -329,7 +329,9 @@ def _chunk_ranges(total: int, size: int) -> List[Tuple[int, int]]:
     ]
 
 
-async def _draft_meals_in_chunks(prompt: str) -> MealPlanDraft:
+async def _draft_meals_in_chunks(
+    prompt: str, *, meals_per_day: int, attempt: int
+) -> MealPlanDraft:
     """Draft the week in day ranges, concurrently, and stitch the result.
 
     Concurrent rather than sequential because they are independent — the same
@@ -349,7 +351,9 @@ async def _draft_meals_in_chunks(prompt: str) -> MealPlanDraft:
             f"{last}. Do not include any other day. The rest of the week is "
             "being planned separately, so do not reference it."
         )
-        return await get_structured_llm(MealPlanDraft).ainvoke(
+        return await get_structured_llm(
+            MealPlanDraft, meals_per_day=meals_per_day, attempt=attempt
+        ).ainvoke(
             [
                 SystemMessage(content=NUTRITIONIST_SYSTEM_PROMPT),
                 HumanMessage(content=scoped),
@@ -410,7 +414,9 @@ async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
 
     try:
         started = time.perf_counter()
-        draft = await _draft_meals_in_chunks(prompt)
+        draft = await _draft_meals_in_chunks(
+            prompt, meals_per_day=profile.meals_per_day, attempt=attempt
+        )
         return {
             "meal_draft": draft,
             "steps": [
@@ -468,6 +474,7 @@ async def plan_training_node(state: AgentState) -> Dict[str, Any]:
     if state.get("training_draft") is not None and not state.get("critique_feedback"):
         return {}
 
+    attempt = state.get("attempt", 1)
     profile: ProfileInDB = state["profile"]
     prompt = build_trainer_prompt(
         profile=profile,
@@ -482,7 +489,7 @@ async def plan_training_node(state: AgentState) -> Dict[str, Any]:
     try:
         started = time.perf_counter()
         draft: TrainingPlanDraft = await get_structured_llm(
-            TrainingPlanDraft
+            TrainingPlanDraft, attempt=attempt
         ).ainvoke(
             [
                 SystemMessage(content=TRAINER_SYSTEM_PROMPT),

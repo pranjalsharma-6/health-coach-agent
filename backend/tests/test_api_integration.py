@@ -606,7 +606,8 @@ def _stub_llm(monkeypatch, *plans: HealthPlan) -> None:
             return scope_to_requested_days(current["draft"], messages)
 
     monkeypatch.setattr(
-        "app.agent.graph.get_structured_llm", lambda schema: StubStructuredLLM(schema)
+        "app.agent.graph.get_structured_llm",
+        lambda schema, **_budget: StubStructuredLLM(schema),
     )
     monkeypatch.setattr("app.agent.llm.is_configured", lambda: True)
     monkeypatch.setattr("app.api.routes.agent.is_configured", lambda: True)

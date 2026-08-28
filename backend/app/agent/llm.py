@@ -23,23 +23,58 @@ logger = get_logger(__name__)
 # `max_tokens` is not a cap you can leave generous "just in case": providers
 # count the space you *reserve* against your rate limit, so an 8000-token
 # reservation exhausted an 8000 TPM free tier before the prompt was counted at
-# all, and every call came back 413. These are sized to what each schema
-# actually produces — a training week is seven activities, not a novel.
-# Output budgets that scale with the work.
+# all, and every call came back 413.
 #
-# A flat number is wrong in both directions: sized for a seven-day plan it
-# over-reserves for a four-day one, and providers count reserved output against
-# the per-minute limit whether it is used or not. The trainer was reserving
-# 1400 tokens to write four days of exercises.
+# But the reservation has to actually fit the answer, and the first attempt at
+# sizing it got two things wrong.
 #
-# (per_day, overhead) — overhead covers the reasoning field and JSON scaffolding.
-PER_DAY_OUTPUT_TOKENS: Dict[str, tuple] = {
-    "MealPlanDraft": (350, 500),      # ~4 meals a day, each with macros
-    "TrainingPlanDraft": (170, 400),  # one session a day, 3-4 named exercises
-}
+# The unit of work is a *meal*, not a day. `meals_per_day` is a profile
+# setting: four meals a day writes a third more JSON than three, and five
+# writes two thirds more. A budget that only counted days under-reserved for
+# exactly those users, on every attempt, forever — the model wrote until it hit
+# the ceiling mid-array and the call came back as `tool_use_failed`.
+#
+# And thinking is charged to the same reservation. A reasoning model emits its
+# reasoning before the answer, out of `max_tokens`, so a budget sized to the
+# answer alone leaves nothing to think with. Four days at four meals measures
+# 1631 tokens of JSON; the old budget was 1900, which is not enough room to
+# think and write.
+#
+# These numbers come from serialising a filled-in draft, not from an estimate:
+# see `tests/test_output_budgets.py`, which regenerates them and fails if the
+# schemas grow past what is reserved.
+TOKENS_PER_MEAL = 110       # meal_type, name, a sentence, four macros
+TOKENS_PER_SESSION = 215    # an activity plus three or four exercises
+PLAN_SCAFFOLDING = 450      # title, reasoning, day wrappers, braces, tool call
 
-MAX_OUTPUT_TOKENS: Dict[str, int] = {
-    # Fallbacks for schemas whose size does not depend on the plan length.
+# Room to think in, on top of the answer. Charged to the same reservation and
+# not separately controllable — LLM_REASONING_EFFORT changes how much a model
+# spends, not whether it comes out of this budget.
+REASONING_HEADROOM = 500
+
+# What makes a retry worth taking. Three attempts at an identical reservation
+# truncate in the same place three times, which is what "failed 3 attempts"
+# with no other difference between them meant. Each attempt gets more room.
+RETRY_BUDGET_GROWTH = 1.4
+MAX_RETRY_GROWTH = 2.0
+
+# No single request may reserve more than this without being asked to.
+#
+# A 429 is waited out; a 413 is not. Providers refuse outright when the
+# reservation alone crowds the per-minute limit, and that refusal is not
+# retryable — so growth that solves a truncation by asking for 7000 tokens has
+# traded a recoverable failure for a fatal one. Sized to leave room for the
+# prompt inside Groq's 8000-token free tier, the tightest limit this runs on.
+# Raise it with LLM_MAX_TOKENS... which is a ceiling, so: a user on a roomier
+# tier who needs more than this should raise the ceiling here, in code, since
+# the setting cannot lift it.
+SAFE_SINGLE_REQUEST_TOKENS = 6000
+
+# Assumed when the caller has no profile to hand (the critic, a recipe).
+DEFAULT_MEALS_PER_DAY = 4
+
+FIXED_OUTPUT_TOKENS: Dict[str, int] = {
+    # Schemas whose size does not depend on the plan.
     "PlanCritique": 700,        # a verdict and a short list of issues
     "Recipe": 1200,             # ingredients, steps, tips for one meal
 }
@@ -118,11 +153,16 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
         )
 
     if status == 413:
+        # Deliberately no longer "try LLM_MAX_TOKENS=1500". A plan needs more
+        # than that, so following it trades a 413 for a plan truncated in the
+        # middle of Tuesday — which is harder to recognise, not easier.
         return LLMFailure(
             "The request was larger than your provider plan allows. Providers "
             "count the output tokens you reserve against your per-minute "
-            "limit, so lowering LLM_MAX_TOKENS in backend/.env (try 1500) "
-            "usually fixes this. The error text names your limit.",
+            "limit, and a plan reserves what it needs to finish. Ask for a "
+            "smaller plan instead: lower PLAN_DURATION_DAYS in backend/.env, "
+            "or reduce meals per day in your profile. The error text names "
+            "your limit.",
             retryable=False,
         )
 
@@ -165,20 +205,25 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
         # Neither `tool_use_failed` nor `json_validate_failed` is a malformed
         # request. Both mean the model was asked for structured output and did
         # not manage to produce it *this time* — a missed tool call, or JSON
-        # that drifted and stopped closing its braces partway through a long
-        # array. That is precisely what the retry budget exists for, and
-        # lumping them in with genuine 400s meant one attempt and no second
-        # chance. An empty `failed_generation` points at truncation instead:
-        # reasoning models spend `max_tokens` thinking before they emit
-        # anything, so a budget that fits the answer can still leave none for
-        # it.
+        # that stopped closing its braces partway through a long array. That is
+        # precisely what the retry budget exists for, and lumping them in with
+        # genuine 400s meant one attempt and no second chance.
+        #
+        # The message no longer tells you to set LLM_REASONING_EFFORT: the
+        # budget now includes room to think, and repeating advice a user has
+        # already followed makes a real fault look like their mistake.
         if "tool_use_failed" in detail or "json_validate_failed" in detail:
+            capped = (
+                ""
+                if settings.llm_max_tokens is None
+                else " LLM_MAX_TOKENS in backend/.env caps how much more it "
+                "can reserve — raise it or remove the line if this repeats."
+            )
             return LLMFailure(
-                "The model did not return the structured output the plan needs. "
-                "If this repeats, the output budget is likely being consumed "
-                "before the answer starts — set LLM_REASONING_EFFORT=low in "
-                "backend/.env, or raise LLM_MAX_TOKENS if your rate limit "
-                "allows.",
+                "The model did not finish the structured output the plan "
+                "needs: it stopped part-way and what arrived could not be "
+                "read. Running out of output room is the usual cause, so the "
+                f"next attempt reserves more.{capped}",
                 retryable=True,
             )
 
@@ -202,22 +247,53 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
     )
 
 
-def budget_for(schema: Any) -> int:
-    """How many output tokens this schema is allowed to use.
+def budget_for(
+    schema: Any,
+    *,
+    meals_per_day: int = DEFAULT_MEALS_PER_DAY,
+    attempt: int = 1,
+) -> int:
+    """How many output tokens this call may reserve.
 
-    `LLM_MAX_TOKENS` caps every budget when set, for keys on a tighter rate
-    limit than the defaults assume.
+    Sized to the work in front of it — this many meals over this many days —
+    plus room to think, and widened on each retry so a second attempt is a
+    different request rather than the same one.
+
+    `LLM_MAX_TOKENS` caps the result when set, for keys on a tighter rate limit
+    than the defaults assume. It is a ceiling, not a target.
+    """
+    budget = uncapped_budget(schema, meals_per_day=meals_per_day, attempt=attempt)
+
+    ceiling = settings.llm_max_tokens
+    return min(budget, ceiling) if ceiling else budget
+
+
+def uncapped_budget(
+    schema: Any,
+    *,
+    meals_per_day: int = DEFAULT_MEALS_PER_DAY,
+    attempt: int = 1,
+) -> int:
+    """What this call needs, before `LLM_MAX_TOKENS` is allowed to take it away.
+
+    Kept separate so `configuration_problem()` can say that a ceiling is set
+    below what the plan needs, rather than the user discovering it as a plan
+    that stops in the middle of Tuesday.
     """
     name = getattr(schema, "__name__", "")
 
-    scaled = PER_DAY_OUTPUT_TOKENS.get(name)
-    if scaled is not None:
-        per_day, overhead = scaled
-        budget = per_day * _days_per_call(name) + overhead
+    if name == "MealPlanDraft":
+        content = TOKENS_PER_MEAL * meals_per_day * _days_per_call(name)
+        content += PLAN_SCAFFOLDING
+    elif name == "TrainingPlanDraft":
+        content = TOKENS_PER_SESSION * _days_per_call(name) + PLAN_SCAFFOLDING
     else:
-        budget = MAX_OUTPUT_TOKENS.get(name, DEFAULT_MAX_OUTPUT_TOKENS)
-    ceiling = settings.llm_max_tokens
-    return min(budget, ceiling) if ceiling else budget
+        content = FIXED_OUTPUT_TOKENS.get(name, DEFAULT_MAX_OUTPUT_TOKENS)
+
+    growth = min(RETRY_BUDGET_GROWTH ** max(0, attempt - 1), MAX_RETRY_GROWTH)
+    return min(
+        int((content + REASONING_HEADROOM) * growth), SAFE_SINGLE_REQUEST_TOKENS
+    )
 
 
 def _days_per_call(schema_name: str) -> int:
@@ -355,7 +431,28 @@ def configuration_problem() -> Optional[str]:
             f"LLM_PROVIDER is {provider}, but {provider.upper()}_API_KEY is "
             "empty in backend/.env."
         )
-    return describe_model_mismatch(provider, resolve_model(provider))
+    mismatch = describe_model_mismatch(provider, resolve_model(provider))
+    if mismatch:
+        return mismatch
+
+    # Imported here, not at module level: `app.models.plan` is what the graph
+    # binds these budgets to, and importing it up top makes the cycle.
+    from app.models.plan import MealPlanDraft
+
+    ceiling = settings.llm_max_tokens
+    needed = uncapped_budget(MealPlanDraft)
+    if ceiling and ceiling < needed:
+        return (
+            f"LLM_MAX_TOKENS is {ceiling}, but a "
+            f"{_days_per_call('MealPlanDraft')}-day block of meals at "
+            f"{DEFAULT_MEALS_PER_DAY} meals a day needs about {needed} output "
+            "tokens. Plans will be cut off part-way through and rejected. "
+            f"Raise it to at least {needed}, or delete the line and let the "
+            "budget size itself. If you set it to get past a 413, lower "
+            "PLAN_DURATION_DAYS instead."
+        )
+
+    return None
 
 
 def api_key_for(provider: str) -> str:
@@ -450,14 +547,23 @@ def get_llm(max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> BaseChatModel:
     return llm
 
 
-def get_structured_llm(schema: Any) -> Any:
+def get_structured_llm(
+    schema: Any,
+    *,
+    meals_per_day: int = DEFAULT_MEALS_PER_DAY,
+    attempt: int = 1,
+) -> Any:
     """Return an LLM bound to a Pydantic output schema.
 
     Structured output is the first line of defence against malformed plans; the
     validator in `validators.py` is the second, because schema-valid output can
     still be nutritionally wrong or violate the user's diet.
+
+    `meals_per_day` and `attempt` only size the output reservation — see
+    `budget_for`. They are keyword-only so a caller cannot pass one as the
+    other and quietly reserve a plan's worth of tokens for a recipe.
     """
-    llm = get_llm(budget_for(schema))
+    llm = get_llm(budget_for(schema, meals_per_day=meals_per_day, attempt=attempt))
 
     # `method=` is an OpenAI-style option. Gemini's integration accepts
     # **kwargs and quietly drops it, so asking for json_mode there produced the

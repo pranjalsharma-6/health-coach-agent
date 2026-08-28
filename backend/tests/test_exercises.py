@@ -235,7 +235,7 @@ class TestFormCueFallback:
                     ExerciseDraft(name="Bodyweight squat", sets=3, reps="12"),
                 ]
 
-        def factory(schema):
+        def factory(schema, **_budget):
             class Stub:
                 async def ainvoke(self, messages):
                     if schema is TrainingPlanDraft:

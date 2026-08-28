@@ -182,23 +182,73 @@ class TestConfigurablePlanLength:
 
         assert PLAN_DURATION_DAYS == settings.plan_duration_days
 
-    def test_the_default_fits_a_free_tier_with_room_to_retry(self):
-        """The number that matters: a first attempt plus one retry inside a
-        single 8000-token minute."""
+    # Groq's free tier, the tightest limit this runs on. Prompt measured from
+    # the real builders and rounded up to cover the tool schema they carry.
+    FREE_TIER_TPM = 8000
+    PROMPT = 1400
+
+    def test_no_single_request_can_be_refused_outright(self):
+        """The invariant that must never break, at any profile size.
+
+        A 429 is waited out by `_RateLimitRetrying`; a 413 is not — a provider
+        refuses a request whose reservation alone crowds the per-minute limit,
+        and that refusal is final. So the retry escalation has a hard ceiling:
+        growth that cures a truncation by asking for 7000 tokens would trade a
+        recoverable failure for a fatal one.
+        """
+        from app.agent.llm import budget_for
+        from app.models.plan import MealPlanDraft
+
+        # Every profile the onboarding form allows, at the last retry.
+        for meals_per_day in range(2, 7):
+            worst = self.PROMPT + budget_for(
+                MealPlanDraft, meals_per_day=meals_per_day, attempt=3
+            )
+            assert worst < self.FREE_TIER_TPM, (
+                f"{meals_per_day} meals/day reserves {worst} tokens on its last "
+                f"attempt against a {self.FREE_TIER_TPM} limit — the provider "
+                "will refuse it with a 413, which is not retried"
+            )
+
+    def test_the_first_attempt_fits_in_one_minute_at_the_default_profile(self):
+        """Both specialists share a superstep, so they share a rate window.
+
+        This used to demand that a first attempt *and* a retry fit the same
+        minute. That goal is gone, and deliberately: meeting it meant reserving
+        1900 tokens for a plan whose JSON measures 1631, leaving nothing for the
+        model to think with — so the first attempt truncated every time and the
+        retry it had saved room for was spent re-failing. Fitting two cheap
+        attempts is worth nothing next to one that works.
+
+        A larger profile can still spill past the limit and wait on the rate
+        limiter. That is a handled, recoverable second or two; truncation was
+        neither.
+        """
         from app.agent import graph
         from app.agent.llm import budget_for
         from app.models.plan import MealPlanDraft, TrainingPlanDraft
 
-        PROMPT = 900  # measured, rounded up
         chunks = graph.meal_chunk_count()
-
-        meals = chunks * (PROMPT + budget_for(MealPlanDraft))
-        first = meals + PROMPT + budget_for(TrainingPlanDraft)
-
-        assert first + meals <= 8000, (
-            f"a first attempt plus one retry costs {first + meals}, which "
-            "leaves the agent one shot on a free tier"
+        first = chunks * (self.PROMPT + budget_for(MealPlanDraft)) + (
+            self.PROMPT + budget_for(TrainingPlanDraft)
         )
+
+        assert first <= self.FREE_TIER_TPM, (
+            f"the default profile's first attempt reserves {first} tokens "
+            f"against a {self.FREE_TIER_TPM} limit — the happy path would be "
+            "rate limited before it ever succeeded"
+        )
+
+    def test_a_retry_fits_on_its_own(self):
+        """The trainer reuses its draft on a retry, so only the meals re-run."""
+        from app.agent import graph
+        from app.agent.llm import budget_for
+        from app.models.plan import MealPlanDraft
+
+        chunks = graph.meal_chunk_count()
+        retry = chunks * (self.PROMPT + budget_for(MealPlanDraft, attempt=2))
+
+        assert retry <= self.FREE_TIER_TPM
 
     def test_the_stored_plan_records_its_own_length(self):
         """A plan generated under one setting must keep working if the setting

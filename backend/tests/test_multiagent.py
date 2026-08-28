@@ -50,7 +50,7 @@ class Recorder:
         match = re.search(r"DAYS (\d+) TO (\d+) ONLY", text)
         return (int(match.group(1)), int(match.group(2))) if match else None
 
-    def factory(self, schema):
+    def factory(self, schema, **_budget):
         recorder = self
 
         class Stub:
@@ -293,7 +293,7 @@ class TestCritic:
     ):
         recorder = Recorder()
 
-        def factory(schema):
+        def factory(schema, **_budget):
             if schema is PlanCritique:
                 class Broken:
                     async def ainvoke(self, _messages):
@@ -359,7 +359,7 @@ class TestAssembly:
         assert "rest day" in reasoning.lower()     # from the trainer
 
     async def test_no_meals_fails_cleanly(self, wired, monkeypatch):
-        def factory(schema):
+        def factory(schema, **_budget):
             class Broken:
                 async def ainvoke(self, _messages):
                     raise RuntimeError("model unavailable")

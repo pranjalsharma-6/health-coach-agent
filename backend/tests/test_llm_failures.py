@@ -102,7 +102,7 @@ def wired(monkeypatch):
 
 
 def always_raising(exc: Exception, counter: list):
-    def factory(_schema):
+    def factory(_schema, **_budget):
         class Stub:
             async def ainvoke(self, _messages):
                 counter.append(1)
@@ -209,7 +209,7 @@ class TestRetryableFailuresStillRetry:
 
         state = {"meal_calls": 0}
 
-        def factory(schema):
+        def factory(schema, **_budget):
             class Stub:
                 async def ainvoke(self, messages):
                     if schema is TrainingPlanDraft:
@@ -363,9 +363,9 @@ class TestOutputBudgets:
         )
 
     def test_no_single_budget_exceeds_the_limit_alone(self):
-        from app.agent.llm import MAX_OUTPUT_TOKENS
+        from app.agent.llm import FIXED_OUTPUT_TOKENS
 
-        for name, budget in MAX_OUTPUT_TOKENS.items():
+        for name, budget in FIXED_OUTPUT_TOKENS.items():
             assert budget < self.FREE_TIER_TPM, f"{name} alone exceeds the limit"
 
     def test_the_trainer_gets_less_than_the_nutritionist(self):
@@ -382,7 +382,9 @@ class TestOutputBudgets:
         class SomethingNew:
             pass
 
-        assert budget_for(SomethingNew) == DEFAULT_MAX_OUTPUT_TOKENS
+        # A floor rather than the whole figure: every budget carries room for
+        # the model to think, which is charged to the same reservation.
+        assert budget_for(SomethingNew) >= DEFAULT_MAX_OUTPUT_TOKENS
 
     def test_llm_max_tokens_caps_every_budget(self, monkeypatch):
         """The escape hatch for a key on a tighter limit than the defaults
@@ -391,11 +393,11 @@ class TestOutputBudgets:
         from app.core.config import settings
         from app.models.plan import MealPlanDraft, PlanCritique
 
-        monkeypatch.setattr(settings, "llm_max_tokens", 900)
+        monkeypatch.setattr(settings, "llm_max_tokens", 1500)
 
-        assert budget_for(MealPlanDraft) == 900
+        assert budget_for(MealPlanDraft) == 1500
         # A budget already below the ceiling is left alone rather than raised.
-        assert budget_for(PlanCritique) == 700
+        assert budget_for(PlanCritique) < 1500
 
     def test_the_client_is_cached_per_budget(self, monkeypatch):
         """One client per distinct budget, not one per call — the budget is a
@@ -435,9 +437,18 @@ class TestRequestTooLarge:
         failure = describe_llm_failure(ProviderError("too large", 413))
         assert failure.retryable is False
 
-    def test_413_names_the_setting_that_fixes_it(self):
-        failure = describe_llm_failure(ProviderError("too large", 413))
-        assert "LLM_MAX_TOKENS" in failure.message
+    def test_413_points_at_a_smaller_plan_not_a_smaller_budget(self):
+        """It used to say "try LLM_MAX_TOKENS=1500".
+
+        That number is below what a plan needs to finish, so following the
+        advice turned a loud 413 into a plan silently cut off mid-week — the
+        harder failure to recognise, reached by doing what the error said. The
+        honest fix for a request that is too large is to ask for less plan.
+        """
+        message = describe_llm_failure(ProviderError("too large", 413)).message
+
+        assert "PLAN_DURATION_DAYS" in message
+        assert "LLM_MAX_TOKENS" not in message
 
 
 class TestToolUseFailed:
@@ -461,9 +472,21 @@ class TestToolUseFailed:
     def test_it_is_retried(self):
         assert describe_llm_failure(self._tool_use_failed()).retryable is True
 
-    def test_it_names_the_settings_that_help(self):
+    def test_it_does_not_repeat_advice_the_user_has_already_taken(self):
+        """It used to say "set LLM_REASONING_EFFORT=low" — to a user who had.
+
+        The budget now carries its own room to think, so that setting is no
+        longer the fix. Telling someone to do what they have already done makes
+        a fault in the code read as a mistake of theirs, and sends them round
+        the same loop.
+        """
         message = describe_llm_failure(self._tool_use_failed()).message
-        assert "LLM_REASONING_EFFORT" in message
+
+        assert "LLM_REASONING_EFFORT" not in message
+        assert "reserves more" in message, (
+            "the message should say what changes on the next attempt, since "
+            "something does"
+        )
 
     def test_a_genuinely_malformed_request_is_still_not_retried(self):
         """Not every 400 is worth another attempt — the distinction is the
@@ -908,15 +931,23 @@ class TestBudgetsScaleWithPlanLength:
         from app.models.plan import MealPlanDraft
 
         monkeypatch.setattr(graph_module, "PLAN_DURATION_DAYS", 1)
-        assert budget_for(MealPlanDraft) < 1200
+        one_day = budget_for(MealPlanDraft)
+
+        monkeypatch.setattr(graph_module, "PLAN_DURATION_DAYS", 4)
+        four_days = budget_for(MealPlanDraft)
+
+        # Relative, not an absolute ceiling: every budget also carries a fixed
+        # allowance for scaffolding and reasoning, so the right question is
+        # whether a shorter plan costs less, not whether it fits a magic number.
+        assert one_day < four_days
 
     def test_the_ceiling_still_applies(self, monkeypatch):
         from app.agent.llm import budget_for
         from app.core.config import settings
         from app.models.plan import MealPlanDraft
 
-        monkeypatch.setattr(settings, "llm_max_tokens", 700)
-        assert budget_for(MealPlanDraft) == 700
+        monkeypatch.setattr(settings, "llm_max_tokens", 1500)
+        assert budget_for(MealPlanDraft) == 1500
 
     def test_every_budget_leaves_room_for_the_answer(self, monkeypatch):
         """Scaling must not shrink a budget below what the output needs.
