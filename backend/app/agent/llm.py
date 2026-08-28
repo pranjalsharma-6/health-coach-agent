@@ -97,8 +97,13 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
                 retryable=False,
             )
 
+        whose = (
+            f"your {PROVIDER_LABELS.get(provider, provider)} API key"
+            if provider
+            else "your API key"
+        )
         return LLMFailure(
-            f"The model '{named}' is not available on your API key. "
+            f"The model '{named}' is not available on {whose}. "
             "Providers retire models on a rolling basis. Run "
             "`python -m app.tools.check_llm` to list the models your key can "
             "use, then set LLM_MODEL in backend/.env to one of them.",
@@ -266,6 +271,93 @@ def resolve_model(provider: str) -> str:
     return settings.llm_model or DEFAULT_MODELS.get(provider, "")
 
 
+# Which provider a model name plainly belongs to.
+#
+# `LLM_MODEL` is applied to whichever provider is active, so a name left behind
+# from trying a different one is invisible until the API refuses it — a Gemini
+# model posted to `api.groq.com` comes back as a bare 404 "model_not_found",
+# which reads like a retired model rather than a line in `.env` pointing at the
+# wrong vendor. The names are distinctive enough to catch that before the call.
+#
+# Order matters: Google's own form is `models/gemini-3.6-flash`, and every other
+# namespaced id (`openai/gpt-oss-120b`, `meta-llama/llama-4-scout-17b`) is
+# Groq's convention of prefixing a model with whoever trained it — which says
+# nothing about who serves it.
+_GEMINI_NAME = re.compile(r"^(?:models/)?gemini[-_.]", re.IGNORECASE)
+_OPENAI_NAME = re.compile(r"^(?:gpt-(?!oss)|chatgpt-|o[1-9](?:$|-))", re.IGNORECASE)
+_GROQ_NAME = re.compile(
+    r"^(?:llama|mixtral|gemma|qwen|deepseek|kimi|moonshot|allam|whisper)",
+    re.IGNORECASE,
+)
+
+PROVIDER_LABELS = {"groq": "Groq", "gemini": "Gemini", "openai": "OpenAI"}
+
+
+def model_belongs_to(model: str) -> Optional[str]:
+    """The provider a model name looks like it is for, or None if unclear.
+
+    Deliberately conservative: an unrecognised name returns None and is passed
+    through untouched, because refusing a model this file has never heard of
+    would break the day a provider ships something new.
+    """
+    name = model.strip()
+    if not name:
+        return None
+
+    if _GEMINI_NAME.match(name):
+        return "gemini"
+    if "/" in name:
+        return "groq"
+    if _OPENAI_NAME.match(name):
+        return "openai"
+    if _GROQ_NAME.match(name):
+        return "groq"
+    return None
+
+
+def describe_model_mismatch(provider: str, model: str) -> Optional[str]:
+    """Why this model name cannot work on this provider, if it cannot.
+
+    Returns None when the pairing is fine or cannot be judged.
+    """
+    owner = model_belongs_to(model)
+    if owner is None or owner == provider:
+        return None
+
+    here = PROVIDER_LABELS.get(provider, provider)
+    there = PROVIDER_LABELS.get(owner, owner)
+    default = DEFAULT_MODELS.get(provider, "")
+
+    return (
+        f"LLM_MODEL is set to '{model}', which is a {there} model name, but the "
+        f"active provider is {here}. The request would go to {here}'s API and "
+        f"come back as a 404. Fix it in backend/.env, one of two ways: "
+        f"either clear the model line (LLM_MODEL= with nothing after it) to use "
+        f"the {here} default, {default}; "
+        f"or switch provider with LLM_PROVIDER={owner} and make sure "
+        f"{owner.upper()}_API_KEY is set. "
+        f"`python -m app.tools.check_llm` lists the models your key can reach."
+    )
+
+
+def configuration_problem() -> Optional[str]:
+    """The reason the LLM configuration cannot work, if there is one.
+
+    Separate from `resolve_model()` so that `check_llm` — the tool you run to
+    fix exactly this — can still report what is configured instead of dying on
+    it.
+    """
+    provider = resolve_provider()
+    if not provider:
+        return None
+    if not api_key_for(provider):
+        return (
+            f"LLM_PROVIDER is {provider}, but {provider.upper()}_API_KEY is "
+            "empty in backend/.env."
+        )
+    return describe_model_mismatch(provider, resolve_model(provider))
+
+
 def api_key_for(provider: str) -> str:
     return {
         "groq": settings.groq_api_key,
@@ -291,6 +383,14 @@ def get_llm(max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS) -> BaseChatModel:
         )
 
     model = resolve_model(provider)
+
+    # Before the client is built, not after the API refuses it. A wrong model
+    # name is a config error like a missing key, so it raises the same way:
+    # named, non-retryable, and shown in the run timeline rather than spent
+    # three times over.
+    mismatch = describe_model_mismatch(provider, model)
+    if mismatch:
+        raise LLMUnavailableError(mismatch)
 
     if provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI

@@ -1450,3 +1450,155 @@ class TestProviderExceptionShapes:
 
         assert result == "the plan"
         assert slept == [31.24], "it should wait exactly as long as Google asked"
+
+
+class TestModelBelongsToProvider:
+    """A model name from one provider must not be sent to another.
+
+    This is the bug that produced a bare 404 from `api.groq.com` for
+    `gemini-3.6-flash`: `LLM_MODEL` was applied to whichever provider happened
+    to be active, and nothing compared the two. The error named the model but
+    not the endpoint, so it read as a retired model rather than as one line in
+    `.env` left over from trying a different vendor.
+    """
+
+    @pytest.mark.parametrize(
+        "name,owner",
+        [
+            ("gemini-3.6-flash", "gemini"),
+            ("models/gemini-2.5-flash", "gemini"),
+            ("gemini-2.0-flash-exp", "gemini"),
+            ("gpt-4o-mini", "openai"),
+            ("gpt-4.1", "openai"),
+            ("o3-mini", "openai"),
+            ("llama-3.3-70b-versatile", "groq"),
+            ("gemma2-9b-it", "groq"),
+            ("qwen3-32b", "groq"),
+            ("deepseek-r1-distill-llama-70b", "groq"),
+        ],
+    )
+    def test_recognises_each_vendors_naming(self, name, owner):
+        from app.agent.llm import model_belongs_to
+
+        assert model_belongs_to(name) == owner
+
+    @pytest.mark.parametrize(
+        "name",
+        ["openai/gpt-oss-120b", "meta-llama/llama-4-scout-17b-16e-instruct"],
+    )
+    def test_a_namespaced_id_is_groqs_convention_not_the_vendors(self, name):
+        """`openai/gpt-oss-120b` is served by Groq, not by OpenAI.
+
+        The prefix names who trained the model, not who hosts it. Reading it as
+        a vendor would reject Groq's own default.
+        """
+        from app.agent.llm import model_belongs_to
+
+        assert model_belongs_to(name) == "groq"
+
+    @pytest.mark.parametrize("name", ["", "   ", "some-new-model-2027", "custom"])
+    def test_an_unrecognised_name_is_passed_through(self, name):
+        """Silence, not a guess.
+
+        Providers ship new names constantly. Refusing everything this file has
+        not heard of would break on the next release; the check exists to catch
+        an obvious mistake, not to police the catalogue.
+        """
+        from app.agent.llm import model_belongs_to
+
+        assert model_belongs_to(name) is None
+
+    def test_a_matching_pair_is_not_a_problem(self):
+        from app.agent.llm import describe_model_mismatch
+
+        assert describe_model_mismatch("groq", "openai/gpt-oss-120b") is None
+        assert describe_model_mismatch("gemini", "gemini-3.6-flash") is None
+
+    def test_the_message_names_both_sides_and_both_fixes(self):
+        from app.agent.llm import describe_model_mismatch
+
+        message = describe_model_mismatch("groq", "gemini-3.6-flash")
+
+        assert message is not None
+        assert "gemini-3.6-flash" in message
+        assert "Groq" in message, "the message must say where it was being sent"
+        assert "LLM_MODEL" in message and "LLM_PROVIDER" in message, (
+            "both ways out should be spelled, since which one is right depends "
+            "on what the user meant"
+        )
+
+    @pytest.mark.anyio
+    async def test_get_llm_refuses_before_calling_the_api(self, monkeypatch):
+        """The client is never built, so no request is made and no retry spent."""
+        from app.agent import llm as llm_module
+
+        monkeypatch.setattr(settings, "llm_provider", "groq")
+        monkeypatch.setattr(settings, "groq_api_key", "gsk_test")
+        monkeypatch.setattr(settings, "llm_model", "gemini-3.6-flash")
+        llm_module.reset_cache()
+
+        with pytest.raises(llm_module.LLMUnavailableError) as caught:
+            llm_module.get_llm()
+
+        assert "gemini-3.6-flash" in str(caught.value)
+        llm_module.reset_cache()
+
+    @pytest.mark.anyio
+    async def test_the_run_reports_it_once_rather_than_retrying(
+        self, wired, monkeypatch
+    ):
+        """`LLMUnavailableError` already routes straight to the record step.
+
+        A configuration error fails identically every time, so three attempts
+        buy nothing but three minutes.
+        """
+        monkeypatch.setattr(settings, "llm_provider", "groq")
+        monkeypatch.setattr(settings, "groq_api_key", "gsk_test")
+        monkeypatch.setattr(settings, "llm_model", "gemini-3.6-flash")
+
+        from app.agent import llm as llm_module
+
+        llm_module.reset_cache()
+
+        final = await graph.run_agent("u1", today=TODAY)
+        messages = " ".join(s["message"] for s in final["steps"])
+
+        assert "gemini-3.6-flash" in messages
+        assert "Groq" in messages
+        llm_module.reset_cache()
+
+    def test_configuration_problem_is_quiet_when_nothing_is_wrong(self, monkeypatch):
+        from app.agent.llm import configuration_problem
+
+        monkeypatch.setattr(settings, "llm_provider", "groq")
+        monkeypatch.setattr(settings, "groq_api_key", "gsk_test")
+        monkeypatch.setattr(settings, "llm_model", "")
+
+        assert configuration_problem() is None
+
+    def test_configuration_problem_catches_a_named_provider_with_no_key(
+        self, monkeypatch
+    ):
+        from app.agent.llm import configuration_problem
+
+        monkeypatch.setattr(settings, "llm_provider", "gemini")
+        monkeypatch.setattr(settings, "gemini_api_key", "")
+        monkeypatch.setattr(settings, "llm_model", "")
+
+        problem = configuration_problem()
+        assert problem is not None and "GEMINI_API_KEY" in problem
+
+    def test_the_404_message_names_the_provider_it_was_sent_to(self, monkeypatch):
+        """Which endpoint refused is half the diagnosis.
+
+        "The model 'gemini-3.6-flash' is not available" is puzzling; "not
+        available on your Groq API key" explains itself.
+        """
+        from app.agent.llm import describe_llm_failure
+
+        monkeypatch.setattr(settings, "llm_provider", "groq")
+        monkeypatch.setattr(settings, "groq_api_key", "gsk_test")
+        monkeypatch.setattr(settings, "llm_model", "some-retired-model-9")
+
+        message = describe_llm_failure(ProviderError("model_not_found", 404)).message
+        assert "Groq" in message

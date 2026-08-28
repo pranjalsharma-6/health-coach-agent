@@ -16,7 +16,12 @@ import sys
 
 import httpx
 
-from app.agent.llm import api_key_for, resolve_model, resolve_provider
+from app.agent.llm import (
+    api_key_for,
+    describe_model_mismatch,
+    resolve_model,
+    resolve_provider,
+)
 from app.core.config import settings
 
 GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
@@ -120,6 +125,16 @@ async def main() -> int:
     if not settings.llm_model:
         _print("                (provider default — set LLM_MODEL to override)")
     _print()
+
+    mismatch = describe_model_mismatch(provider, model)
+    if mismatch:
+        # Printed before the network call because the listing below is the
+        # answer to it: these are the names that would work here.
+        _print("PROBLEM")
+        for line in mismatch.split(". "):
+            if line.strip():
+                _print(f"  {line.strip().rstrip('.')}.")
+        _print()
 
     try:
         models = await _fetch_models(provider, key)

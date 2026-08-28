@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes import agent, auth, logs, plans, profile
 from app.core.config import settings
+from app.agent.llm import configuration_problem
+from app.agent.llm import is_configured as llm_is_configured
 from app.core.logging import get_logger, setup_logging
 from app.db import mongo
 
@@ -24,10 +26,32 @@ async def lifespan(_: FastAPI):
     lazily inside the first user's request.
     """
     logger.info("Starting %s (env=%s)", settings.app_name, settings.environment)
+    _warn_about_llm_configuration()
     await mongo.connect_to_mongo()
     yield
     await mongo.close_mongo_connection()
     logger.info("Shutdown complete")
+
+
+def _warn_about_llm_configuration() -> None:
+    """Say at boot that the model settings cannot work, rather than at use.
+
+    A model name that belongs to a different provider is a one-line mistake in
+    `.env` that only shows up as a 404 in the middle of a plan run, several
+    minutes and one filled-in questionnaire later. Startup is where it is
+    cheapest to find, so it gets the same unmissable banner the database uses.
+    """
+    problem = configuration_problem()
+    if not problem:
+        return
+
+    logger.error("=" * 72)
+    logger.error("LLM MISCONFIGURED - the API started but cannot generate plans")
+    logger.error("")
+    for line in problem.split(". "):
+        if line.strip():
+            logger.error("  %s", line.strip().rstrip(".") + ".")
+    logger.error("=" * 72)
 
 
 app = FastAPI(
@@ -109,6 +133,9 @@ async def health() -> dict:
     return {
         "status": "healthy" if healthy else "degraded",
         "database": db_status,
-        "llm_configured": bool(settings.groq_api_key or settings.openai_api_key),
+        # `is_configured()` knows about Gemini and about LLM_PROVIDER; the old
+        # two-key check reported "configured" for a key the resolved provider
+        # would never use.
+        "llm_configured": llm_is_configured() and configuration_problem() is None,
         "environment": settings.environment,
     }
