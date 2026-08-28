@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from app.agent.graph import generate_recipe
-from app.agent.llm import LLMUnavailableError, is_configured
+from app.agent.llm import LLMUnavailableError, describe_llm_failure, is_configured
 from app.api.deps import CurrentProfile, CurrentUser
 from app.core.logging import get_logger
 from app.db.repositories import PlanRepository
@@ -142,10 +142,14 @@ async def expand_recipe(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
     except Exception as exc:
+        # `type(exc).__name__` is not a diagnosis. "BadRequestError" told the
+        # user nothing they could act on and hid which of a dozen causes it
+        # was; `describe_llm_failure` already knows how to read a provider
+        # error and is what the agent's own timeline uses.
         logger.exception("Recipe generation failed for meal %s", meal_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Could not generate the recipe: {type(exc).__name__}",
+            detail=f"Could not generate the recipe. {describe_llm_failure(exc).message}",
         ) from exc
 
     # Cache it back into the plan without creating a new version — enrichment

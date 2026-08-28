@@ -170,7 +170,9 @@ class TestGenerationVerification:
                 calls["n"] += 1
                 return queue.pop(0) if len(queue) > 1 else queue[0]
 
-        monkeypatch.setattr(graph, "get_structured_llm", lambda _schema: Stub())
+        monkeypatch.setattr(
+            graph, "get_structured_llm", lambda _schema, **_budget: Stub()
+        )
         return calls
 
     async def test_accurate_recipe_is_accepted_first_time(self, monkeypatch):
@@ -239,3 +241,130 @@ class TestGenerationVerification:
             "Tofu stir fry", "Vegan.", 290, 35, make_profile(diet_type=DietType.VEGAN)
         )
         assert analysis.protein_g == pytest.approx(34.6, abs=0.5)
+
+
+class ProviderError(Exception):
+    """Shaped like a Groq/OpenAI error: a status code and the provider's body."""
+
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class TestARecipeThatWillNotFitOnTheFirstTry:
+    """A long recipe used to fail once and be reported as "BadRequestError".
+
+    How much a recipe writes is not knowable before it is written. A one-pan
+    tofu scramble is 475 tokens; "rajma with cauliflower rice and a cucumber
+    salad" is three dishes and 861. One flat reservation is right for one and
+    short for the other, and the short case truncated, came back as a 400, and
+    was surfaced to the user as the name of an exception class.
+
+    The plan path had already learned both halves of this — retry a truncated
+    structured output, and say what went wrong. The recipe path had neither.
+    """
+
+    @staticmethod
+    def _failing_then_working(monkeypatch, recipe, failures: int):
+        """Fail with a truncated structured output `failures` times, then work."""
+        seen: list[int] = []
+
+        def factory(_schema, **budget):
+            attempt = budget.get("attempt", 1)
+            seen.append(attempt)
+
+            class Stub:
+                async def ainvoke(self, _messages):
+                    if len(seen) <= failures:
+                        raise ProviderError(
+                            "tool_use_failed: Failed to call a function.", 400
+                        )
+                    return recipe
+
+            return Stub()
+
+        monkeypatch.setattr(graph, "get_structured_llm", factory)
+        return seen
+
+    async def test_a_truncated_recipe_is_retried(self, monkeypatch):
+        good = make_recipe([{"item": "kidney beans", "quantity_g": 150}])
+        seen = self._failing_then_working(monkeypatch, good, failures=1)
+
+        recipe, _analysis = await graph.generate_recipe(
+            "Rajma with cauliflower rice",
+            "Hearty rajma over low-carb cauliflower rice.",
+            310,
+            28,
+            make_profile(diet_type=DietType.VEGETARIAN),
+        )
+
+        assert recipe is good
+        # A third call can follow: the macro-correction loop re-asks when the
+        # summed weights miss the meal's claim. Only the first two are the
+        # retry under test.
+        assert seen[:2] == [1, 2], "the truncated draft was not retried"
+
+    async def test_the_retry_asks_for_more_room(self, monkeypatch):
+        """Otherwise it is the same request twice, and truncates twice."""
+        good = make_recipe([{"item": "kidney beans", "quantity_g": 150}])
+        seen = self._failing_then_working(monkeypatch, good, failures=1)
+
+        await graph.generate_recipe(
+            "Rajma with cauliflower rice", "Hearty rajma.", 310, 28, make_profile()
+        )
+
+        from app.agent.llm import budget_for
+        from app.models.plan import Recipe as RecipeSchema
+
+        first, second = (budget_for(RecipeSchema, attempt=n) for n in seen[:2])
+        assert second > first
+
+    async def test_it_gives_up_rather_than_looping(self, monkeypatch):
+        good = make_recipe([{"item": "kidney beans", "quantity_g": 150}])
+        seen = self._failing_then_working(monkeypatch, good, failures=99)
+
+        with pytest.raises(ProviderError):
+            await graph.generate_recipe(
+                "Rajma with cauliflower rice", "Hearty rajma.", 310, 28, make_profile()
+            )
+
+        assert len(seen) == graph.MAX_RECIPE_DRAFT_ATTEMPTS
+
+    async def test_a_config_error_is_not_retried(self, monkeypatch):
+        """A rejected key fails identically every time. Retrying is theatre."""
+        good = make_recipe([{"item": "paneer", "quantity_g": 100}])
+        seen = self._failing_then_working(monkeypatch, good, failures=99)
+
+        def factory(_schema, **budget):
+            seen.append(budget.get("attempt", 1))
+
+            class Stub:
+                async def ainvoke(self, _messages):
+                    raise ProviderError("invalid api key", 401)
+
+            return Stub()
+
+        monkeypatch.setattr(graph, "get_structured_llm", factory)
+        seen.clear()
+
+        with pytest.raises(ProviderError):
+            await graph.generate_recipe(
+                "Paneer bhurji", "Quick and high protein.", 400, 30, make_profile()
+            )
+
+        assert len(seen) == 1
+
+
+class TestTheRecipeErrorSaysSomething:
+    def test_the_exception_class_name_is_not_the_message(self):
+        """What the user actually saw was "Could not generate the recipe:
+        BadRequestError" — a class name, naming none of the dozen things a 400
+        can mean and suggesting nothing to do about any of them."""
+        from app.agent.llm import describe_llm_failure
+
+        message = describe_llm_failure(
+            ProviderError("tool_use_failed: Failed to call a function.", 400)
+        ).message
+
+        assert "BadRequestError" not in message
+        assert len(message.split()) > 8, "a diagnosis is longer than two words"

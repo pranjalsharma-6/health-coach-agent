@@ -1018,6 +1018,11 @@ async def stream_agent(
 RECIPE_MACRO_TOLERANCE = 0.30
 MAX_RECIPE_ATTEMPTS = 2
 
+# Attempts at getting the recipe written at all, as opposed to written
+# accurately. Two, because the second reserves more output room than the first
+# and that is the failure being retried.
+MAX_RECIPE_DRAFT_ATTEMPTS = 2
+
 
 async def generate_recipe(
     meal_name: str,
@@ -1034,7 +1039,6 @@ async def generate_recipe(
     regardless: a slightly-off recipe the user can cook beats an error page,
     and the analysis travels with it so the UI can be honest about the gap.
     """
-    structured = get_structured_llm(Recipe)
     messages = [
         SystemMessage(content=RECIPE_SYSTEM_PROMPT),
         HumanMessage(
@@ -1044,8 +1048,8 @@ async def generate_recipe(
         ),
     ]
 
-    recipe: Recipe = await structured.ainvoke(messages)
-    analysis = analyse_recipe(recipe.ingredients)
+    structured = await _draft_recipe(messages, meal_name)
+    recipe, analysis = structured
 
     for attempt in range(2, MAX_RECIPE_ATTEMPTS + 1):
         if not analysis.is_reliable:
@@ -1078,10 +1082,49 @@ async def generate_recipe(
                 )
             )
         )
-        recipe = await structured.ainvoke(messages)
-        analysis = analyse_recipe(recipe.ingredients)
+        recipe, analysis = await _draft_recipe(messages, meal_name)
 
     return recipe, analysis
+
+
+async def _draft_recipe(
+    messages: List[Any], meal_name: str
+) -> tuple[Recipe, RecipeAnalysis]:
+    """Ask for one recipe, retrying a truncated answer with more room.
+
+    How long a recipe runs is not knowable before it is written: a one-pan
+    tofu scramble is nine ingredients and eight steps, while "rajma with
+    cauliflower rice and a cucumber salad" is three dishes and twice the JSON.
+    A single fixed reservation is therefore right for one of them and wrong for
+    the other, and the one it is wrong for came back as a bare
+    `BadRequestError` with no second attempt — the plan path had learned to
+    retry these and this path had not.
+    """
+    last: Exception | None = None
+
+    for attempt in range(1, MAX_RECIPE_DRAFT_ATTEMPTS + 1):
+        try:
+            recipe: Recipe = await get_structured_llm(
+                Recipe, attempt=attempt
+            ).ainvoke(messages)
+            return recipe, analyse_recipe(recipe.ingredients)
+
+        except Exception as exc:
+            failure = describe_llm_failure(exc)
+            if not failure.retryable:
+                raise
+
+            last = exc
+            logger.info(
+                "Recipe draft for '%s' failed on attempt %s (%s) — retrying "
+                "with a larger budget.",
+                meal_name,
+                attempt,
+                failure.message,
+            )
+
+    assert last is not None
+    raise last
 
 
 def _macros_agree(
