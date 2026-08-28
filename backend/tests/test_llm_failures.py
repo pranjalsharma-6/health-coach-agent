@@ -1238,3 +1238,120 @@ class TestRetiredModels:
         from app.agent.llm import suggested_replacement
 
         assert suggested_replacement(text) == expected
+
+
+class TestGeminiStructuredOutput:
+    """`method="json_mode"` is an OpenAI-style option Gemini does not have.
+
+    Its `with_structured_output` takes **kwargs and drops unknown ones, so the
+    setting was accepted and ignored — while the adapter still appended a full
+    JSON Schema to the prompt. Gemini then had its own function-calling path
+    *and* a schema dump telling it to return raw JSON. The reply could not be
+    coerced, LangChain's parser returned None, and the None travelled until
+    `draft.days` raised AttributeError in the graph.
+    """
+
+    def _fake_gemini(self, monkeypatch, captured):
+        import sys
+        import types
+
+        class FakeStructured:
+            async def ainvoke(self, _messages):
+                return "structured"
+
+        class FakeGemini:
+            def __init__(self, **kwargs):
+                pass
+
+            def with_structured_output(self, schema, **kwargs):
+                captured.update(kwargs)
+                return FakeStructured()
+
+        fake = types.ModuleType("langchain_google_genai")
+        fake.ChatGoogleGenerativeAI = FakeGemini
+        monkeypatch.setitem(sys.modules, "langchain_google_genai", fake)
+
+        for field in ("groq_api_key", "openai_api_key"):
+            monkeypatch.setattr(settings, field, "")
+        monkeypatch.setattr(settings, "gemini_api_key", "AIza-test")
+        monkeypatch.setattr(settings, "llm_provider", "gemini")
+
+    def test_json_mode_is_not_requested_from_gemini(self, monkeypatch):
+        import app.agent.llm as llm_module
+        from app.models.plan import TrainingPlanDraft
+
+        captured: dict = {}
+        self._fake_gemini(monkeypatch, captured)
+        monkeypatch.setattr(settings, "llm_structured_method", "json_mode")
+        llm_module.reset_cache()
+
+        llm_module.get_structured_llm(TrainingPlanDraft)
+
+        assert "method" not in captured, (
+            "Gemini drops the kwarg silently; asking for it only misleads"
+        )
+        llm_module.reset_cache()
+
+    async def test_gemini_is_not_sent_a_schema_dump(self, monkeypatch):
+        """The adapter's prompt injection belongs to json_mode only."""
+        import app.agent.llm as llm_module
+        from langchain_core.messages import HumanMessage
+        from app.models.plan import TrainingPlanDraft
+
+        captured: dict = {}
+        self._fake_gemini(monkeypatch, captured)
+        monkeypatch.setattr(settings, "llm_structured_method", "json_mode")
+        llm_module.reset_cache()
+
+        runnable = llm_module.get_structured_llm(TrainingPlanDraft)
+        assert not isinstance(runnable, llm_module._JsonModeAdapter)
+        llm_module.reset_cache()
+
+    @pytest.mark.parametrize("provider,expected", [
+        ("groq", True), ("openai", True), ("gemini", False),
+    ])
+    def test_which_providers_support_the_option(self, monkeypatch, provider, expected):
+        from app.agent.llm import provider_supports_json_mode
+
+        monkeypatch.setattr(settings, "llm_provider", provider)
+        assert provider_supports_json_mode() is expected
+
+
+class TestNeverNone:
+    """A structured parser that returns None must not be allowed to travel.
+
+    LangChain returns None when it cannot coerce a response — no exception, no
+    message. The observed traceback pointed at `draft.days` in the graph, four
+    frames and one file away from the model call that produced nothing.
+    """
+
+    @staticmethod
+    def _wrap(result):
+        import app.agent.llm as llm_module
+        from app.models.plan import TrainingPlanDraft
+
+        class Returns:
+            async def ainvoke(self, _messages):
+                return result
+
+        return llm_module._NeverNone(Returns(), TrainingPlanDraft)
+
+    async def test_none_raises_where_it_happens(self):
+        with pytest.raises(ValueError, match="returned nothing usable"):
+            await self._wrap(None).ainvoke([])
+
+    async def test_the_error_names_the_schema(self):
+        with pytest.raises(ValueError, match="TrainingPlanDraft"):
+            await self._wrap(None).ainvoke([])
+
+    async def test_a_real_result_passes_through(self):
+        assert await self._wrap("a draft").ainvoke([]) == "a draft"
+
+    async def test_falsy_but_present_results_are_not_rejected(self):
+        """Only None means "could not parse". An empty list is an answer."""
+        assert await self._wrap([]).ainvoke([]) == []
+
+    def test_the_failure_is_retryable(self):
+        """An unparseable reply is the transient case the retry budget exists
+        for — unlike a retired model or a bad key."""
+        assert describe_llm_failure(ValueError("returned nothing usable")).retryable

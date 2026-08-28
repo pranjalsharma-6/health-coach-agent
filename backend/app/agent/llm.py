@@ -345,14 +345,57 @@ def get_structured_llm(schema: Any) -> Any:
     """
     llm = get_llm(budget_for(schema))
 
-    if settings.llm_structured_method == "json_mode":
+    # `method=` is an OpenAI-style option. Gemini's integration accepts
+    # **kwargs and quietly drops it, so asking for json_mode there produced the
+    # worst of both: its own function-calling path *plus* a JSON Schema dumped
+    # into the prompt by the adapter. The model got two contradictory
+    # instructions and returned something the parser could not coerce.
+    if settings.llm_structured_method == "json_mode" and provider_supports_json_mode():
         return _RateLimitRetrying(
-            _JsonModeAdapter(
-                llm.with_structured_output(schema, method="json_mode"), schema
+            _NeverNone(
+                _JsonModeAdapter(
+                    llm.with_structured_output(schema, method="json_mode"), schema
+                ),
+                schema,
             )
         )
 
-    return _RateLimitRetrying(llm.with_structured_output(schema))
+    return _RateLimitRetrying(_NeverNone(llm.with_structured_output(schema), schema))
+
+
+def provider_supports_json_mode() -> bool:
+    """Which providers understand `with_structured_output(method=...)`.
+
+    Gemini does not. Silently ignoring the setting is better than failing, but
+    only because the alternative path works — this is not a preference.
+    """
+    return resolve_provider() in {"groq", "openai"}
+
+
+class _NeverNone:
+    """Turn a silent `None` into an error that names itself.
+
+    LangChain's structured-output parsers return None when they cannot coerce a
+    response — no exception, no message. The None then travels until something
+    reads an attribute off it, and the traceback points at `draft.days` in the
+    graph rather than at the model call that produced nothing. Failing here
+    keeps the diagnosis next to the cause, and makes it retryable like any
+    other generation failure.
+    """
+
+    def __init__(self, runnable: Any, schema: Any):
+        self._runnable = runnable
+        self._schema_name = getattr(schema, "__name__", "the expected schema")
+
+    async def ainvoke(self, messages: Any) -> Any:
+        result = await self._runnable.ainvoke(messages)
+        if result is None:
+            raise ValueError(
+                f"The model returned nothing usable for {self._schema_name}. "
+                "Its reply could not be read as the required structure — often "
+                "a response that was empty, truncated, or blocked."
+            )
+        return result
 
 
 # How long to wait for a rate-limit window, and how many times.
