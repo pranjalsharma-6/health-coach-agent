@@ -68,6 +68,21 @@ def describe_connection_failure(exc: Exception) -> str:
             "network, try a phone hotspot: some block outbound MongoDB traffic."
         )
 
+    # Checked before the generic timeout below: "resolution lifetime expired"
+    # contains the word "timed out" but is a DNS failure, not an unreachable
+    # server, and the two need opposite fixes.
+    if "resolution lifetime expired" in detail or "DNS operation timed out" in detail:
+        return (
+            "The SRV lookup that a 'mongodb+srv://' address needs timed out. "
+            "Plain hostname lookups can still work, which is why other tools "
+            "look fine — SRV and TXT queries are a different record type, and "
+            "networks that intercept DNS often drop them. Two ways out: use a "
+            "phone hotspot, or switch MONGODB_URI to the non-SRV form. In "
+            "Atlas: Connect > Drivers > select an older driver version, which "
+            "gives a 'mongodb://' address listing the shards directly and "
+            "needs no SRV lookup at all."
+        )
+
     if "timed out" in detail.lower() or "ServerSelectionTimeout" in type(exc).__name__:
         return (
             "The database hostname resolved but did not answer. Usually Atlas "

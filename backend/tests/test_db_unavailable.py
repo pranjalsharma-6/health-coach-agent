@@ -216,3 +216,51 @@ class TestConnectionFailureMessages:
         """A topology description runs to thousands of characters."""
         message = self._describe("x" * 5000)
         assert len(message) < 400
+
+
+class TestSrvLookupFailure:
+    """`mongodb+srv://` needs SRV and TXT records, not just a hostname.
+
+    A network can resolve A records perfectly — Test-NetConnection succeeds,
+    the browser works — and still drop SRV queries. Networks that intercept
+    DNS commonly do. The failure says "The resolution lifetime expired ... The
+    DNS operation timed out", which contains the word "timed out" and was
+    therefore read as an unreachable server, sending the user to check the
+    Atlas IP allowlist for a problem that was never on Atlas's side.
+    """
+
+    SRV_TIMEOUT = (
+        "The resolution lifetime expired after 8.204 seconds: Server "
+        "Do53:192.168.102.1@53 answered The DNS operation timed out.; Server "
+        "Do53:8.8.8.8@53 answered The DNS operation timed out."
+    )
+
+    def _describe(self, message):
+        return mongo.describe_connection_failure(Exception(message))
+
+    def test_it_is_recognised_as_a_dns_failure(self):
+        message = self._describe(self.SRV_TIMEOUT)
+
+        assert "SRV" in message
+        assert "Network Access" not in message, (
+            "an SRV timeout is not an Atlas allowlist problem"
+        )
+
+    def test_it_explains_why_other_tools_look_fine(self):
+        """The user had just proved the host was reachable on port 27017."""
+        message = self._describe(self.SRV_TIMEOUT)
+        assert "different record type" in message
+
+    def test_it_names_the_non_srv_workaround(self):
+        """The fix that needs no network cooperation."""
+        message = self._describe(self.SRV_TIMEOUT)
+
+        assert "non-SRV" in message
+        assert "Atlas" in message
+
+    def test_a_plain_server_timeout_still_points_at_network_access(self):
+        """The distinction the ordering exists for."""
+        message = self._describe("connection attempt timed out")
+
+        assert "Network Access" in message
+        assert "SRV" not in message
