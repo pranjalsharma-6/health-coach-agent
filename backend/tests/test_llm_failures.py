@@ -965,7 +965,7 @@ class TestDailyVersusPerMinuteLimits:
         assert is_daily_limit(self.DAILY)
         assert not is_daily_limit(self.PER_MINUTE)
 
-    def test_a_daily_limit_is_not_retried(self):
+    def test_a_daily_limit_with_a_long_wait_is_not_retried(self):
         """Three attempts against a spent daily allowance is three failures."""
         assert describe_llm_failure(self._limited(self.DAILY)).retryable is False
 
@@ -989,7 +989,7 @@ class TestDailyVersusPerMinuteLimits:
 
         assert "9 minutes" in message
 
-    async def test_the_waiter_does_not_sit_on_a_daily_limit(self):
+    async def test_the_waiter_does_not_sit_on_a_long_wait(self):
         """Blocking a request for nine minutes is not a retry, it is a hang."""
         import app.agent.llm as llm_module
 
@@ -1355,3 +1355,98 @@ class TestNeverNone:
         """An unparseable reply is the transient case the retry budget exists
         for — unlike a retired model or a bad key."""
         assert describe_llm_failure(ValueError("returned nothing usable")).retryable
+
+
+class TestProviderExceptionShapes:
+    """Providers spell the same failure differently.
+
+    Groq and OpenAI raise exceptions with `status_code`. Google's `api_core`
+    exceptions carry `code`. A classifier that only knew `status_code` was
+    blind to every Gemini rate limit — the run retried instantly three times,
+    with no wait and a generic message, because the 429 was never recognised
+    as a 429.
+    """
+
+    class GoogleStyle(Exception):
+        """Shaped like google.api_core.exceptions.ResourceExhausted."""
+
+        def __init__(self, message, code=429):
+            super().__init__(message)
+            self.code = code
+
+    GOOGLE_QUOTA = (
+        "429 You exceeded your current quota. * Quota exceeded for metric: "
+        "generativelanguage.googleapis.com/generate_content_free_tier_requests, "
+        "limit: 20, model: gemini-3.6-flash Please retry in 31.24s. "
+        'violations { quota_id: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }'
+    )
+
+    def test_a_google_style_exception_is_recognised(self):
+        from app.agent.llm import http_status
+
+        assert http_status(self.GoogleStyle("quota")) == 429
+
+    def test_an_openai_style_exception_is_recognised(self):
+        from app.agent.llm import http_status
+
+        assert http_status(ProviderError("limited", 429)) == 429
+
+    def test_the_status_is_read_from_the_text_as_a_last_resort(self):
+        """Some wrappers expose neither attribute."""
+        from app.agent.llm import http_status
+
+        assert http_status(RuntimeError("got a 503 from upstream")) == 503
+
+    def test_a_plain_exception_has_no_status(self):
+        from app.agent.llm import http_status
+
+        assert http_status(ValueError("could not parse")) is None
+
+    def test_a_year_is_not_mistaken_for_a_status(self):
+        from app.agent.llm import http_status
+
+        assert http_status(ValueError("failed at 2026-08-28")) is None
+
+    def test_googles_quota_error_is_classified_and_waited_on(self):
+        """It names a daily quota *and* a 31-second wait. The wait is what
+        matters — refusing to wait throws away a run half a minute from
+        working."""
+        failure = describe_llm_failure(self.GoogleStyle(self.GOOGLE_QUOTA))
+
+        assert failure.retryable is True
+        assert "31 seconds" in failure.message
+
+    def test_googles_retry_phrasing_is_parsed(self):
+        """Groq says "try again in", Google says "retry in"."""
+        from app.agent.llm import parse_retry_after_seconds
+
+        assert parse_retry_after_seconds("Please retry in 31.24s") == 31.24
+        assert parse_retry_after_seconds("Please try again in 24.9s") == 24.9
+
+    def test_googles_quota_id_reads_as_a_daily_limit(self):
+        from app.agent.llm import is_daily_limit
+
+        assert is_daily_limit(self.GOOGLE_QUOTA)
+
+    async def test_the_waiter_now_sees_google_rate_limits(self):
+        import app.agent.llm as llm_module
+
+        slept: list = []
+
+        async def record(seconds):
+            slept.append(seconds)
+
+        calls = {"n": 0}
+        outer = self
+
+        class Flaky:
+            async def ainvoke(self, _messages):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise outer.GoogleStyle(outer.GOOGLE_QUOTA)
+                return "the plan"
+
+        result = await llm_module._RateLimitRetrying(Flaky(), sleep=record).ainvoke([])
+
+        assert result == "the plan"
+        assert slept == [31.24], "it should wait exactly as long as Google asked"

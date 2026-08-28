@@ -75,7 +75,7 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
     and OpenAI raise their own separate hierarchies for the same conditions and
     this module deliberately does not import either vendor's SDK.
     """
-    status = getattr(exc, "status_code", None)
+    status = http_status(exc)
     detail = str(exc).strip()
 
     if status == 404:
@@ -126,19 +126,33 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
         # completely different problem. Waiting works for the first and is
         # useless for the second — telling a user to "wait a minute" when they
         # have spent their day's allowance sends them in circles.
-        if is_daily_limit(detail):
-            wait = describe_wait(detail)
+        # What decides the response is how long the wait is, not which
+        # quota was hit. Google reports a *daily* request quota and then says
+        # "retry in 31s", because the window rolls — refusing to wait there
+        # would throw away a run that was half a minute from working.
+        hinted = parse_retry_after_seconds(detail, cap=None)
+        waitable = hinted is not None and hinted <= MAX_RATE_LIMIT_WAIT_SECONDS
+
+        if waitable:
             return LLMFailure(
-                "You have used your provider's allowance for the day, not just "
-                f"for this minute{wait}. Waiting will not help much: either "
-                "use a smaller plan (PLAN_DURATION_DAYS in backend/.env), or "
-                "raise the limit on your provider account.",
+                f"Rate limited by the provider{describe_wait(detail)}. Kaya "
+                "waits and retries on its own.",
+                retryable=True,
+            )
+
+        if is_daily_limit(detail):
+            return LLMFailure(
+                "You have used your provider's allowance for the day"
+                f"{describe_wait(detail)}. Waiting will not help much: use a "
+                "smaller plan (PLAN_DURATION_DAYS in backend/.env), switch "
+                "provider with LLM_PROVIDER, or raise the limit on your "
+                "account.",
                 retryable=False,
             )
 
         return LLMFailure(
-            "Rate limited by the provider's per-minute cap. Kaya waits for the "
-            "window and retries on its own.",
+            "Rate limited by the provider, with no usable estimate of how long "
+            "for. Try again shortly.",
             retryable=True,
         )
 
@@ -409,6 +423,23 @@ DEFAULT_RATE_LIMIT_WAIT_SECONDS = 35.0
 MAX_RATE_LIMIT_WAIT_SECONDS = 90.0
 
 
+def http_status(exc: Exception) -> Optional[int]:
+    """The HTTP status behind a provider exception, however it is spelled.
+
+    Groq and OpenAI expose `status_code`. Google's `api_core` exceptions carry
+    `code` instead, so a layer that only knew `status_code` was blind to every
+    Gemini rate limit: no wait, instant retries, and a generic message. Falling
+    back to the text catches wrappers that expose neither.
+    """
+    for attribute in ("status_code", "code"):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, int) and 100 <= value < 600:
+            return value
+
+    match = re.search(r"\b(4\d\d|5\d\d)\b", str(exc))
+    return int(match.group(1)) if match else None
+
+
 def suggested_replacement(message: str) -> Optional[str]:
     """The model a provider names as the successor, when it names one.
 
@@ -437,7 +468,9 @@ def is_daily_limit(message: str) -> bool:
     call for opposite responses.
     """
     lowered = message.lower()
-    return "per day" in lowered or "tpd" in lowered
+    # Groq says "on tokens per day (TPD)". Google names the quota id, e.g.
+    # "GenerateRequestsPerDayPerProjectPerModel-FreeTier".
+    return "per day" in lowered or "tpd" in lowered or "perday" in lowered
 
 
 def describe_wait(message: str) -> str:
@@ -464,8 +497,10 @@ def parse_retry_after_seconds(
     exception LangChain surfaces. Honouring the provider's own number beats
     guessing at one.
     """
+    # "Please try again in 1m13.5s" (Groq) and "Please retry in 31.24s"
+    # (Google) are the same sentence with a different verb.
     match = re.search(
-        r"try again in\s+(?:(\d+)m)?\s*([\d.]+)s", message, re.IGNORECASE
+        r"(?:try again|retry) in\s+(?:(\d+)m)?\s*([\d.]+)s", message, re.IGNORECASE
     )
     if not match:
         return None
@@ -498,12 +533,13 @@ class _RateLimitRetrying:
             except Exception as exc:
                 if attempt == MAX_RATE_LIMIT_WAITS:
                     raise
-                if getattr(exc, "status_code", None) != 429:
+                if http_status(exc) != 429:
                     raise
 
-                if is_daily_limit(str(exc)):
-                    # Waiting out a daily allowance means blocking the request
-                    # for minutes. Fail now and say so.
+                hinted = parse_retry_after_seconds(str(exc), cap=None)
+                if hinted is not None and hinted > MAX_RATE_LIMIT_WAIT_SECONDS:
+                    # Blocking a web request for minutes is a hang, not a
+                    # retry. Fail now and let the message explain.
                     raise
 
                 wait = (
