@@ -51,6 +51,40 @@ _MUST_ENCODE = {
 }
 
 
+def describe_connection_failure(exc: Exception) -> str:
+    """Say which layer failed, rather than quoting pymongo at the user.
+
+    The three cases look nothing alike from the outside and need completely
+    different responses, but they arrive as one exception type with a wall of
+    topology description attached.
+    """
+    detail = str(exc)
+
+    if "getaddrinfo failed" in detail or "nodename nor servname" in detail:
+        return (
+            "The database hostname could not be resolved, which means the "
+            "machine has no working DNS — not that the connection string is "
+            "wrong. Check the internet connection first. On a campus or office "
+            "network, try a phone hotspot: some block outbound MongoDB traffic."
+        )
+
+    if "timed out" in detail.lower() or "ServerSelectionTimeout" in type(exc).__name__:
+        return (
+            "The database hostname resolved but did not answer. Usually Atlas "
+            "> Network Access does not list your current IP address, or a "
+            "firewall is blocking port 27017."
+        )
+
+    if "auth" in detail.lower() or "not authorized" in detail.lower():
+        return (
+            "The database rejected the username or password. Check "
+            "MONGODB_URI, and remember special characters must be "
+            "percent-encoded."
+        )
+
+    return f"Could not reach MongoDB: {detail[:200]}"
+
+
 def describe_credential_problem(uri: str) -> Optional[str]:
     """Explain an unescaped-credentials error in terms of what to change.
 
@@ -129,14 +163,8 @@ async def connect_to_mongo() -> None:
         _database = None
 
     except PyMongoError as exc:
-        _connection_error = str(exc)
-        _fail_loudly(
-            f"Could not reach MongoDB: {exc}",
-            detail=(
-                "If the credentials are right, check Atlas > Network Access "
-                "allows your current IP address."
-            ),
-        )
+        _connection_error = describe_connection_failure(exc)
+        _fail_loudly(_connection_error, detail=str(exc)[:200])
         _client = None
         _database = None
 

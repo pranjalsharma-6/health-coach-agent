@@ -160,3 +160,59 @@ def test_get_database_raises_the_typed_error(monkeypatch):
 
     with pytest.raises(mongo.DatabaseUnavailableError, match="because reasons"):
         mongo.get_database()
+
+
+class TestConnectionFailureMessages:
+    """DNS, firewall and auth failures arrive as one exception type.
+
+    They look identical from the outside — a PyMongoError with a wall of
+    topology description — and need completely different responses. A user
+    whose Wi-Fi dropped was told to check their connection string.
+    """
+
+    @staticmethod
+    def _describe(message, cls=Exception):
+        return mongo.describe_connection_failure(cls(message))
+
+    def test_dns_failure_points_at_the_network(self):
+        """`getaddrinfo failed` is one layer below the connection string —
+        the hostname was never even looked up."""
+        message = self._describe(
+            "ac-83tbkc0-shard-00-00.wpud7ke.mongodb.net:27017: "
+            "[Errno 11001] getaddrinfo failed"
+        )
+
+        assert "resolved" in message
+        assert "internet connection" in message
+
+    def test_dns_failure_does_not_blame_the_connection_string(self):
+        message = self._describe("[Errno 11001] getaddrinfo failed")
+        assert "MONGODB_URI" not in message
+
+    def test_dns_failure_mentions_campus_networks(self):
+        """University and office networks commonly block port 27017, and a
+        phone hotspot is the fastest way to tell."""
+        message = self._describe("[Errno 11001] getaddrinfo failed")
+        assert "hotspot" in message
+
+    def test_a_timeout_points_at_network_access(self):
+        """Resolved but silent is the Atlas IP allowlist, not DNS."""
+        message = self._describe("connection attempt timed out")
+
+        assert "Network Access" in message
+        assert "internet connection" not in message
+
+    def test_an_auth_failure_points_at_the_credentials(self):
+        message = self._describe("bad auth: Authentication failed")
+
+        assert "username or password" in message
+        assert "percent-encoded" in message
+
+    def test_an_unrecognised_failure_is_still_reported(self):
+        message = self._describe("something entirely new went wrong")
+        assert "something entirely new" in message
+
+    def test_the_message_is_bounded(self):
+        """A topology description runs to thousands of characters."""
+        message = self._describe("x" * 5000)
+        assert len(message) < 400
