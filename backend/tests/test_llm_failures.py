@@ -1178,3 +1178,63 @@ class TestProviderSelection:
                 Settings(_env_file=None)
         finally:
             os.environ.pop("LLM_PROVIDER", None)
+
+
+class TestRetiredModels:
+    """A hardcoded model default is a default that goes stale.
+
+    `gemini-2.5-flash` was current when it was written into this repo and
+    refused for new keys by the time it ran. The fix is not a better guess: it
+    is to repeat what the provider says, since the provider is the authority on
+    its own model names.
+    """
+
+    GOOGLE_404 = (
+        "404 This model models/gemini-2.5-flash is no longer available to new "
+        "users. Please update your code to use models/gemini-3.6-flash for the "
+        "latest features and improvements. We recommend you to use the "
+        "Interactions API."
+    )
+
+    def test_the_replacement_is_extracted(self):
+        from app.agent.llm import suggested_replacement
+
+        assert suggested_replacement(self.GOOGLE_404) == "gemini-3.6-flash"
+
+    def test_prose_is_not_mistaken_for_a_model(self):
+        """"use the Interactions API" is advice, not a model name. Without a
+        digit test it is exactly what the pattern would grab."""
+        from app.agent.llm import suggested_replacement
+
+        assert suggested_replacement("We recommend you use the Interactions API") is None
+        assert suggested_replacement("please use a supported model") is None
+
+    def test_a_bare_404_offers_the_listing_tool_instead(self):
+        failure = describe_llm_failure(ProviderError("model_not_found", 404))
+
+        assert "check_llm" in failure.message
+        assert failure.retryable is False
+
+    def test_the_suggestion_is_turned_into_an_instruction(self):
+        failure = describe_llm_failure(ProviderError(self.GOOGLE_404, 404))
+
+        assert "LLM_MODEL=gemini-3.6-flash" in failure.message
+        assert failure.retryable is False
+
+    def test_it_is_never_retried(self):
+        """A retired model does not come back between attempts."""
+        assert describe_llm_failure(ProviderError(self.GOOGLE_404, 404)).retryable is False
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("please use gpt-4o instead", "gpt-4o"),
+            ("update your code to use models/gemini-3.6-flash", "gemini-3.6-flash"),
+            ("use claude-sonnet-5.", "claude-sonnet-5"),
+            ("nothing suggested here", None),
+        ],
+    )
+    def test_extraction_across_provider_phrasings(self, text, expected):
+        from app.agent.llm import suggested_replacement
+
+        assert suggested_replacement(text) == expected

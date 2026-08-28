@@ -88,6 +88,15 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
             or "the configured model"
         )
 
+        replacement = suggested_replacement(detail)
+        if replacement:
+            return LLMFailure(
+                f"The model '{named}' is no longer available. The provider "
+                f"suggests '{replacement}' — set LLM_MODEL={replacement} in "
+                "backend/.env and restart.",
+                retryable=False,
+            )
+
         return LLMFailure(
             f"The model '{named}' is not available on your API key. "
             "Providers retire models on a rolling basis. Run "
@@ -208,9 +217,14 @@ def _days_per_call(schema_name: str) -> int:
 
 # Model names do not travel between providers, so each carries its own
 # default. `LLM_MODEL` overrides whichever is selected.
+# These go stale. Providers retire models on their own schedule, and a default
+# written down once is a default that is wrong later — `gemini-2.5-flash` was
+# correct when it was written and refused for new keys by the time it shipped.
+# `check_llm` lists what a key can actually reach, and the 404 below repeats
+# whatever replacement the provider names.
 DEFAULT_MODELS = {
     "groq": "openai/gpt-oss-120b",
-    "gemini": "gemini-2.5-flash",
+    "gemini": "gemini-3.6-flash",
     "openai": "gpt-4o-mini",
 }
 
@@ -350,6 +364,26 @@ def get_structured_llm(schema: Any) -> Any:
 MAX_RATE_LIMIT_WAITS = 2
 DEFAULT_RATE_LIMIT_WAIT_SECONDS = 35.0
 MAX_RATE_LIMIT_WAIT_SECONDS = 90.0
+
+
+def suggested_replacement(message: str) -> Optional[str]:
+    """The model a provider names as the successor, when it names one.
+
+    Google's 404 is unusually helpful: "This model models/gemini-2.5-flash is
+    no longer available to new users. Please update your code to use
+    models/gemini-3.6-flash". Repeating that back turns a dead end into a
+    one-line fix, and the provider is a better source for its own model names
+    than anything written into this file.
+    """
+    match = re.search(
+        r"use\s+(?:models/)?([A-Za-z0-9][A-Za-z0-9._\-]{2,60})", message
+    )
+    if not match:
+        return None
+
+    candidate = match.group(1).rstrip(".")
+    # "use the Interactions API" and similar prose are not model names.
+    return candidate if any(c.isdigit() for c in candidate) else None
 
 
 def is_daily_limit(message: str) -> bool:
