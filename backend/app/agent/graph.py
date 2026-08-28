@@ -310,6 +310,11 @@ async def start_generation_node(state: AgentState) -> Dict[str, Any]:
 # the same reasoning one level down.
 MEAL_CHUNK_DAYS = 4
 
+# How many validation errors to show in the timeline. One plus a count of
+# hidden ones tells the user nothing they can act on, and hides the errors
+# that explain the visible one.
+MAX_ERRORS_SHOWN = 4
+
 
 def meal_chunk_count() -> int:
     """How many requests one meal draft takes. Used by tests."""
@@ -694,7 +699,13 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
     if result.is_valid:
         message = "Plan passed all checks."
         if result.warnings:
-            message += f" ({len(result.warnings)} minor note(s).)"
+            # Say what the note is, not how many there are. A count is a
+            # notification that something happened; the text is the thing the
+            # user might act on — "this plan rotates sooner than asked" being
+            # the case that matters.
+            first = result.warnings[0]
+            rest = len(result.warnings) - 1
+            message += f" Note: {first}" + (f" (+{rest} more)" if rest else "")
         return {
             "validation_errors": [],
             "validation_warnings": result.warnings,
@@ -704,7 +715,11 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
             ],
         }
 
-    extra = f" (+{len(result.errors) - 1} more)" if len(result.errors) > 1 else ""
+    # Show several. One error plus "(+2 more)" is unactionable — the hidden
+    # ones are often the reason the visible one happened.
+    shown = result.errors[:MAX_ERRORS_SHOWN]
+    hidden = len(result.errors) - len(shown)
+    extra = f" (+{hidden} more)" if hidden else ""
     return {
         "validation_errors": result.errors,
         "validation_warnings": result.warnings,
@@ -714,7 +729,7 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
             step(
                 "validate",
                 "failed",
-                f"Rejected: {result.errors[0]}{extra}",
+                f"Rejected: {' · '.join(shown)}{extra}",
                 errors=result.errors,
             ),
         ],

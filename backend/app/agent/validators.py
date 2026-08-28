@@ -11,6 +11,7 @@ regeneration; warnings are recorded but tolerated.
 
 import re
 from dataclasses import dataclass, field
+from math import ceil
 from typing import List, Optional
 
 from app.core.logging import get_logger
@@ -25,6 +26,13 @@ from app.services.nutrition import (
 )
 
 logger = get_logger(__name__)
+
+# A plan shorter than this cannot rotate meaningfully — two days of food on
+# repeat is not a plan, it is a pair of menus.
+MIN_USABLE_PLAN_DAYS = 3
+
+# How much shorter than requested a plan may be and still ship.
+SHORT_PLAN_TOLERANCE = 0.7
 
 # How far a day's totals may drift from target before it's a failure.
 CALORIE_TOLERANCE = 0.12   # ±12%
@@ -94,13 +102,38 @@ def _check_structure(
         result.errors.append("Plan contains no days.")
         return
 
-    # A short week passed every check below: the numbering of [1, 2] is
-    # perfectly sequential. The run reported "Drafted 2 days of meals" and
-    # would have shipped a two-day week as a seven-day plan.
-    if expected_days is not None and len(plan.daily_plans) != expected_days:
-        result.errors.append(
-            f"Plan has {len(plan.daily_plans)} days, expected {expected_days}."
+    # A short plan used to pass every check below — the numbering of [1, 2] is
+    # perfectly sequential — so a two-day plan shipped as a week.
+    #
+    # But requiring the exact count throws away good plans. Models reliably
+    # come up one day short on this kind of output, and a correct three-day
+    # plan is worth far more to the user than a fourth attempt that also fails.
+    # Plans record their own length and day resolution counts against the plan
+    # rather than the request, so a short plan is coherent — it simply rotates
+    # sooner. Only a plan too short to be a plan is rejected.
+    if expected_days is not None:
+        actual = len(plan.daily_plans)
+        # Never demand more than was asked for: a one-day plan cannot be
+        # too short when one day is the request.
+        floor = min(
+            expected_days,
+            max(MIN_USABLE_PLAN_DAYS, ceil(expected_days * SHORT_PLAN_TOLERANCE)),
         )
+
+        if actual > expected_days:
+            result.errors.append(
+                f"Plan has {actual} days, more than the {expected_days} requested."
+            )
+        elif actual < floor:
+            result.errors.append(
+                f"Plan has {actual} days, too few to be usable "
+                f"(expected {expected_days})."
+            )
+        elif actual < expected_days:
+            result.warnings.append(
+                f"Plan has {actual} days rather than {expected_days}; it will "
+                "rotate sooner."
+            )
 
     day_numbers = [d.day for d in plan.daily_plans]
     expected = list(range(1, len(plan.daily_plans) + 1))

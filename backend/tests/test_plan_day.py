@@ -94,20 +94,46 @@ class TestPlanLength:
             targets,
         )
 
-    def test_a_short_plan_is_rejected(self):
+    def test_a_plan_too_short_to_use_is_rejected(self):
         from app.agent.validators import validate_plan
 
         plan, profile, targets = self._plan_and_profile(2)
         result = validate_plan(plan, profile, targets, expected_days=7)
 
         assert not result.is_valid
-        assert any("expected 7" in e for e in result.errors)
+        assert any("too few to be usable" in e for e in result.errors)
 
-    def test_a_long_plan_is_rejected(self):
+    def test_a_slightly_short_plan_ships_with_a_warning(self):
+        """Models come up a day short on this kind of output, and a correct
+        five-day plan beats a fourth attempt that also fails. It rotates
+        sooner, which is true and worth saying, not a reason to bin it."""
+        from app.agent.validators import validate_plan
+
+        plan, profile, targets = self._plan_and_profile(5)
+        result = validate_plan(plan, profile, targets, expected_days=7)
+
+        assert result.is_valid
+        assert any("rotate sooner" in w for w in result.warnings)
+
+    def test_the_shortfall_is_never_silent(self):
+        from app.agent.validators import validate_plan
+
+        plan, profile, targets = self._plan_and_profile(3)
+        result = validate_plan(plan, profile, targets, expected_days=4)
+
+        assert result.is_valid
+        assert result.warnings, "a short plan must say so"
+
+    def test_a_plan_longer_than_requested_is_rejected(self):
+        """Tolerance runs one way only. Extra days were not asked for and cost
+        the user time they did not agree to spend."""
         from app.agent.validators import validate_plan
 
         plan, profile, targets = self._plan_and_profile(9)
-        assert not validate_plan(plan, profile, targets, expected_days=7).is_valid
+        result = validate_plan(plan, profile, targets, expected_days=7)
+
+        assert not result.is_valid
+        assert any("more than" in e for e in result.errors)
 
     def test_the_right_length_passes(self):
         from app.agent.validators import validate_plan
@@ -122,6 +148,23 @@ class TestPlanLength:
 
         plan, profile, targets = self._plan_and_profile(2)
         assert validate_plan(plan, profile, targets).is_valid
+
+    def test_the_floor_holds_even_for_a_short_request(self):
+        """70% of 3 is 2.1, but two days on repeat is not a plan."""
+        from app.agent.validators import MIN_USABLE_PLAN_DAYS, validate_plan
+
+        plan, profile, targets = self._plan_and_profile(2)
+        assert not validate_plan(plan, profile, targets, expected_days=3).is_valid
+        assert MIN_USABLE_PLAN_DAYS == 3
+
+    @pytest.mark.parametrize("days", [1, 2])
+    def test_the_floor_never_exceeds_the_request(self, days):
+        """Asking for one day and getting one day is not a shortfall. The floor
+        is a guard against the model under-delivering, not a minimum product."""
+        from app.agent.validators import validate_plan
+
+        plan, profile, targets = self._plan_and_profile(days)
+        assert validate_plan(plan, profile, targets, expected_days=days).is_valid
 
 
 class TestConfigurablePlanLength:
