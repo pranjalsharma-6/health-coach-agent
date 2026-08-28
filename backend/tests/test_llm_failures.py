@@ -924,3 +924,108 @@ class TestBudgetsScaleWithPlanLength:
             assert budget_for(MealPlanDraft) > needed, (
                 f"{days}-day plan: budget too tight for the meals it must hold"
             )
+
+
+class TestDailyVersusPerMinuteLimits:
+    """Two completely different problems behind one status code.
+
+    A per-minute cap clears by waiting; a daily allowance does not. The
+    original message told a user whose day's tokens were spent that "waiting a
+    minute usually clears it", which sent them round the same loop three times.
+    """
+
+    DAILY = (
+        "Rate limit reached for model `openai/gpt-oss-120b` in organization "
+        "`org_x` service tier `on_demand` on tokens per day (TPD): Limit "
+        "200000, Used 197032, Requested 4220. Please try again in 9m0.864s."
+    )
+    PER_MINUTE = (
+        "Rate limit reached on tokens per minute (TPM): Limit 8000, "
+        "Requested 9243. Please try again in 24.9s."
+    )
+
+    @staticmethod
+    def _limited(message):
+        return ProviderError(message, 429)
+
+    def test_a_daily_limit_is_recognised(self):
+        from app.agent.llm import is_daily_limit
+
+        assert is_daily_limit(self.DAILY)
+        assert not is_daily_limit(self.PER_MINUTE)
+
+    def test_a_daily_limit_is_not_retried(self):
+        """Three attempts against a spent daily allowance is three failures."""
+        assert describe_llm_failure(self._limited(self.DAILY)).retryable is False
+
+    def test_a_per_minute_limit_is_retried(self):
+        assert describe_llm_failure(self._limited(self.PER_MINUTE)).retryable is True
+
+    def test_the_daily_message_does_not_suggest_waiting_a_minute(self):
+        message = describe_llm_failure(self._limited(self.DAILY)).message
+
+        assert "day" in message.lower()
+        assert "waiting a minute" not in message.lower()
+
+    def test_the_daily_message_names_what_would_actually_help(self):
+        message = describe_llm_failure(self._limited(self.DAILY)).message
+
+        assert "PLAN_DURATION_DAYS" in message
+
+    def test_the_provider_s_own_estimate_is_quoted(self):
+        """Nine minutes, from the error text — not a number we invented."""
+        message = describe_llm_failure(self._limited(self.DAILY)).message
+
+        assert "9 minutes" in message
+
+    async def test_the_waiter_does_not_sit_on_a_daily_limit(self):
+        """Blocking a request for nine minutes is not a retry, it is a hang."""
+        import app.agent.llm as llm_module
+
+        slept: list = []
+
+        async def record(seconds):
+            slept.append(seconds)
+
+        class DailyLimited:
+            async def ainvoke(self, _messages):
+                raise TestDailyVersusPerMinuteLimits._limited(
+                    TestDailyVersusPerMinuteLimits.DAILY
+                )
+
+        with pytest.raises(ProviderError):
+            await llm_module._RateLimitRetrying(DailyLimited(), sleep=record).ainvoke([])
+
+        assert slept == [], "a daily limit must fail fast, not wait"
+
+    async def test_the_waiter_still_waits_on_a_per_minute_limit(self):
+        import app.agent.llm as llm_module
+
+        slept: list = []
+
+        async def record(seconds):
+            slept.append(seconds)
+
+        calls = {"n": 0}
+
+        class Flaky:
+            async def ainvoke(self, _messages):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise TestDailyVersusPerMinuteLimits._limited(
+                        TestDailyVersusPerMinuteLimits.PER_MINUTE
+                    )
+                return "the plan"
+
+        result = await llm_module._RateLimitRetrying(Flaky(), sleep=record).ainvoke([])
+
+        assert result == "the plan"
+        assert slept == [24.9]
+
+    def test_an_uncapped_read_is_available_for_reporting(self):
+        """The wait is capped for *waiting* — telling the user it is nine
+        minutes should not report ninety seconds."""
+        from app.agent.llm import parse_retry_after_seconds
+
+        assert parse_retry_after_seconds(self.DAILY) == 90.0  # capped, for sleeping
+        assert parse_retry_after_seconds(self.DAILY, cap=None) == 540.864

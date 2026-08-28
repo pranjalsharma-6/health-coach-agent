@@ -104,9 +104,23 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
         )
 
     if status == 429:
+        # A per-minute limit and a per-day one are the same status code and a
+        # completely different problem. Waiting works for the first and is
+        # useless for the second — telling a user to "wait a minute" when they
+        # have spent their day's allowance sends them in circles.
+        if is_daily_limit(detail):
+            wait = describe_wait(detail)
+            return LLMFailure(
+                "You have used your provider's allowance for the day, not just "
+                f"for this minute{wait}. Waiting will not help much: either "
+                "use a smaller plan (PLAN_DURATION_DAYS in backend/.env), or "
+                "raise the limit on your provider account.",
+                retryable=False,
+            )
+
         return LLMFailure(
-            "Rate limited by the provider. The free tier has a per-minute cap; "
-            "waiting a minute usually clears it.",
+            "Rate limited by the provider's per-minute cap. Kaya waits for the "
+            "window and retries on its own.",
             retryable=True,
         )
 
@@ -272,7 +286,34 @@ DEFAULT_RATE_LIMIT_WAIT_SECONDS = 35.0
 MAX_RATE_LIMIT_WAIT_SECONDS = 90.0
 
 
-def parse_retry_after_seconds(message: str) -> Optional[float]:
+def is_daily_limit(message: str) -> bool:
+    """Is this a per-day allowance rather than a per-minute one?
+
+    Groq names it in the error text: "on tokens per day (TPD)". The status code
+    is 429 either way, so without this the two are indistinguishable — and they
+    call for opposite responses.
+    """
+    lowered = message.lower()
+    return "per day" in lowered or "tpd" in lowered
+
+
+def describe_wait(message: str) -> str:
+    """", and the provider suggests waiting about 9 minutes" — or nothing.
+
+    Read from the provider's own text rather than estimated, and phrased as a
+    clause so it drops cleanly into a sentence when absent.
+    """
+    seconds = parse_retry_after_seconds(message, cap=None)
+    if seconds is None:
+        return ""
+    if seconds < 90:
+        return f", and it suggests waiting about {round(seconds)} seconds"
+    return f", and it suggests waiting about {round(seconds / 60)} minutes"
+
+
+def parse_retry_after_seconds(
+    message: str, cap: Optional[float] = MAX_RATE_LIMIT_WAIT_SECONDS
+) -> Optional[float]:
     """How long the provider asked us to wait, if it said.
 
     Groq phrases it inside the error text — "Please try again in 1m13.5s" —
@@ -288,7 +329,8 @@ def parse_retry_after_seconds(message: str) -> Optional[float]:
 
     minutes = float(match.group(1) or 0)
     seconds = float(match.group(2))
-    return min(minutes * 60 + seconds, MAX_RATE_LIMIT_WAIT_SECONDS)
+    total = minutes * 60 + seconds
+    return min(total, cap) if cap is not None else total
 
 
 class _RateLimitRetrying:
@@ -314,6 +356,11 @@ class _RateLimitRetrying:
                 if attempt == MAX_RATE_LIMIT_WAITS:
                     raise
                 if getattr(exc, "status_code", None) != 429:
+                    raise
+
+                if is_daily_limit(str(exc)):
+                    # Waiting out a daily allowance means blocking the request
+                    # for minutes. Fail now and say so.
                     raise
 
                 wait = (
