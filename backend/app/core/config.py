@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     # the escape hatch when a model keeps failing to emit a tool call.
     llm_structured_method: str = Field(default="function_calling")
 
+    # --- Planning ---
+    # How many days a generated plan covers. Four rather than seven because a
+    # week costs roughly 7500 tokens of an 8000-per-minute free tier, which
+    # leaves no room for the retry the agent is designed around. Raise it if
+    # your provider's limit allows — nothing else in the system assumes seven.
+    plan_duration_days: int = Field(default=4, ge=1, le=14)
+
     @field_validator("llm_structured_method", mode="before")
     @classmethod
     def _check_method(cls, v):

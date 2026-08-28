@@ -70,6 +70,7 @@ from app.agent.prompts import (
 from app.agent.state import AgentState, new_state, step
 from app.services.exercises import cue_for
 from app.agent.validators import build_retry_feedback, validate_plan
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.repositories import (
     AgentEventRepository,
@@ -102,7 +103,9 @@ from app.services.nutrition import calculate_targets
 logger = get_logger(__name__)
 
 MAX_GENERATION_ATTEMPTS = 3
-PLAN_DURATION_DAYS = 7
+# Read once at import. Changing PLAN_DURATION_DAYS in .env needs a restart,
+# which `uvicorn --reload` does for you.
+PLAN_DURATION_DAYS = settings.plan_duration_days
 
 # The critic gets one revision round. Allowed to keep asking, it would spend
 # the user's time on diminishing preferences.

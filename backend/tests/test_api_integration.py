@@ -241,7 +241,11 @@ class TestAgentRun:
         assert body["decision"] == "create_initial"
         assert body["error"] is None
         assert body["plan"] is not None
-        assert len(body["plan"]["daily_plans"]) == 7
+        # Length is configurable; assert against the configuration rather
+        # than a number that used to be true.
+        from app.agent.graph import PLAN_DURATION_DAYS
+
+        assert len(body["plan"]["daily_plans"]) == PLAN_DURATION_DAYS
         assert body["plan"]["version"] == 1
 
     async def test_active_plan_is_retrievable_after_a_run(self, client, monkeypatch):

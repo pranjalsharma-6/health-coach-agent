@@ -333,16 +333,17 @@ class TestCritic:
 class TestAssembly:
     async def test_missing_training_days_become_rest(self, wired, monkeypatch):
         """A short training draft shouldn't cost the user their meals."""
-        partial = make_training_draft(days=3)
-        recorder = Recorder(training=partial)
+        # One day short of the plan, whatever the plan's length is.
+        short_by_one = graph.PLAN_DURATION_DAYS - 1
+        recorder = Recorder(training=make_training_draft(days=short_by_one))
         monkeypatch.setattr(graph, "get_structured_llm", recorder.factory)
 
         final = await graph.run_agent("u1", today=TODAY)
         plan = final["saved_plan"]
 
         assert plan is not None
-        assert len(plan.daily_plans) == 7
-        assert plan.daily_plans[6].activity.duration_minutes == 0
+        assert len(plan.daily_plans) == graph.PLAN_DURATION_DAYS
+        assert plan.daily_plans[-1].activity.duration_minutes == 0
 
         assemble = next(s for s in final["steps"] if s["node"] == "assemble")
         assert "set to rest" in assemble["message"]
@@ -419,9 +420,15 @@ class TestChunkedMealDrafting:
             "chunks must tile the week with no gap and no overlap"
         )
 
-    def test_more_than_one_chunk(self):
-        """A single chunk would be the behaviour this replaces."""
-        assert graph.meal_chunk_count() > 1
+    def test_a_long_plan_is_split(self):
+        """Chunking is what a seven-day plan needs; a four-day one fits in a
+        single call, so assert the behaviour rather than the current config."""
+        assert len(graph._chunk_ranges(7, graph.MEAL_CHUNK_DAYS)) > 1
+
+    def test_the_chunk_count_matches_the_configured_length(self):
+        assert graph.meal_chunk_count() == len(
+            graph._chunk_ranges(graph.PLAN_DURATION_DAYS, graph.MEAL_CHUNK_DAYS)
+        )
 
     def test_no_chunk_is_longer_than_the_limit(self):
         for first, last in graph._chunk_ranges(
@@ -467,6 +474,10 @@ class TestChunkedMealDrafting:
             range(1, graph.PLAN_DURATION_DAYS + 1)
         )
 
+    @pytest.mark.skipif(
+        "graph.meal_chunk_count() < 2",
+        reason="only meaningful when the plan is long enough to split",
+    )
     async def test_the_chunks_run_concurrently(self, wired, monkeypatch):
         """Sequential chunks would double the wait for the same week."""
         recorder = Recorder(delay=0.15)

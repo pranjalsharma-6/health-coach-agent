@@ -11,6 +11,7 @@ while each card shows "Eaten".
 The server now publishes the resolved day and the client uses it.
 """
 
+import pytest
 from datetime import date, datetime, time
 
 class TestPlanDayIsPublished:
@@ -121,3 +122,57 @@ class TestPlanLength:
 
         plan, profile, targets = self._plan_and_profile(2)
         assert validate_plan(plan, profile, targets).is_valid
+
+
+class TestConfigurablePlanLength:
+    """Plan length is a setting, not a constant.
+
+    Seven days costs roughly 7500 tokens of an 8000-per-minute free tier,
+    leaving nothing for the retry the agent is designed around — so the default
+    is four, and anyone whose provider allows more can raise it without a code
+    change.
+    """
+
+    def test_the_graph_follows_the_setting(self):
+        from app.agent.graph import PLAN_DURATION_DAYS
+        from app.core.config import settings
+
+        assert PLAN_DURATION_DAYS == settings.plan_duration_days
+
+    def test_the_default_fits_a_free_tier_with_room_to_retry(self):
+        """The number that matters: a first attempt plus one retry inside a
+        single 8000-token minute."""
+        from app.agent import graph
+        from app.agent.llm import budget_for
+        from app.models.plan import MealPlanDraft, TrainingPlanDraft
+
+        PROMPT = 900  # measured, rounded up
+        chunks = graph.meal_chunk_count()
+
+        meals = chunks * (PROMPT + budget_for(MealPlanDraft))
+        first = meals + PROMPT + budget_for(TrainingPlanDraft)
+
+        assert first + meals <= 8000, (
+            f"a first attempt plus one retry costs {first + meals}, which "
+            "leaves the agent one shot on a free tier"
+        )
+
+    def test_the_stored_plan_records_its_own_length(self):
+        """A plan generated under one setting must keep working if the setting
+        changes — `_resolve_plan_day` counts against the plan, not the config."""
+        from tests.factories import make_health_plan, make_targets
+
+        plan = make_health_plan(make_targets(), days=4)
+        assert len(plan.daily_plans) == 4
+
+    @pytest.mark.parametrize("days", [1, 4, 7, 14])
+    def test_any_supported_length_validates(self, days):
+        from app.agent.validators import validate_plan
+        from app.models.enums import DietType
+        from tests.factories import make_health_plan, make_profile, make_targets
+
+        targets = make_targets()
+        plan = make_health_plan(targets, days=days)
+        profile = make_profile(diet_type=DietType.VEGETARIAN)
+
+        assert validate_plan(plan, profile, targets, expected_days=days).is_valid
