@@ -26,6 +26,7 @@ async def lifespan(_: FastAPI):
     lazily inside the first user's request.
     """
     logger.info("Starting %s (env=%s)", settings.app_name, settings.environment)
+    logger.info("CORS allows: %s", settings.cors_origins or "(nothing — every browser request will be blocked)")
     _warn_about_llm_configuration()
     await mongo.connect_to_mongo()
     yield
@@ -138,4 +139,15 @@ async def health() -> dict:
         # would never use.
         "llm_configured": llm_is_configured() and configuration_problem() is None,
         "environment": settings.environment,
+        # The allowed origins, reported back.
+        #
+        # A CORS misconfiguration is invisible from both ends: the browser only
+        # says a header was missing, and the server logs a request it answered
+        # normally. Nothing tells you what the server actually believes its
+        # allowed origins are, so a wrong value looks exactly like no value —
+        # and you cannot tell a trailing slash from a stale deploy.
+        #
+        # These are not a secret. CORS works by announcing them to any browser
+        # that asks, and they are the public URL of your own site.
+        "cors_origins": settings.cors_origins,
     }
