@@ -26,12 +26,36 @@ async def lifespan(_: FastAPI):
     lazily inside the first user's request.
     """
     logger.info("Starting %s (env=%s)", settings.app_name, settings.environment)
-    logger.info("CORS allows: %s", settings.cors_origins or "(nothing — every browser request will be blocked)")
+    _warn_about_cors()
     _warn_about_llm_configuration()
     await mongo.connect_to_mongo()
     yield
     await mongo.close_mongo_connection()
     logger.info("Shutdown complete")
+
+
+def _warn_about_cors() -> None:
+    """Say what the browser will be allowed to do, at boot.
+
+    A CORS problem is silent on both sides — the browser reports a missing
+    header, the server logs a request it answered — so the running value is
+    printed where it can be compared against the site that is failing. On a
+    deployed API that still allows only localhost, nothing on the internet can
+    call it, and that deserves the same banner a missing database gets.
+    """
+    origins = settings.cors_origins
+    logger.info("CORS allows: %s", origins or "(nothing)")
+
+    local_only = all("localhost" in o or "127.0.0.1" in o for o in origins)
+    if settings.is_production and (not origins or local_only):
+        logger.error("=" * 72)
+        logger.error("CORS NOT CONFIGURED - the API started but no website may call it")
+        logger.error("")
+        logger.error("  Allowed origins: %s", origins or "(none)")
+        logger.error("  Every browser request will fail with a CORS error.")
+        logger.error("  Set CORS_ORIGINS to your site's URL, e.g.")
+        logger.error("    CORS_ORIGINS=https://your-app.vercel.app")
+        logger.error("=" * 72)
 
 
 def _warn_about_llm_configuration() -> None:
@@ -68,13 +92,25 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def add_cors(target: FastAPI) -> None:
+    """Wire the browser allow list onto an app.
+
+    A function rather than three lines inline so a test can exercise the real
+    wiring against a chosen configuration. The alternative — reloading this
+    module with different environment variables — swaps the shared `settings`
+    object out from under every other module that imported it, which broke
+    three unrelated tests before this existed.
+    """
+    target.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+add_cors(app)
 
 @app.exception_handler(mongo.DatabaseUnavailableError)
 async def _database_unavailable(_: Request, exc: mongo.DatabaseUnavailableError):

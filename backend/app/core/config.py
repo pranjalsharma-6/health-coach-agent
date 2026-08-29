@@ -8,6 +8,35 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
+def normalise_origin(value: str) -> str:
+    """Reduce a configured origin to the form a browser actually sends.
+
+    A browser's `Origin` header is scheme://host[:port] and nothing else — no
+    path, no trailing slash, lowercase. CORS then compares it to the allow list
+    as an exact string, so `https://site.vercel.app/` never matches
+    `https://site.vercel.app` and the failure is completely silent: the browser
+    reports only that a header was missing.
+
+    That trailing slash is the single most common deployment mistake, and the
+    dashboard you paste it into shows you nothing wrong. Since every one of
+    these differences is unambiguously a typo — no origin is ever meant to end
+    in a slash, or to carry quotes, or to be uppercase — they are corrected
+    here rather than left to fail an exact-match comparison at 3am.
+
+    A bare host with no scheme is corrected too. It cannot possibly match, so
+    it is certainly a mistake, and https is the only sane reading of one.
+    """
+    text = value.strip().strip('"').strip("'").strip()
+    text = text.rstrip("/")
+
+    if text and "://" not in text:
+        text = f"https://{text}"
+
+    # Scheme and host are case-insensitive and browsers always send them
+    # lowercased. There is no path to preserve the case of.
+    return text.lower()
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -133,15 +162,20 @@ class Settings(BaseSettings):
         what the old list-typed field used to require — so both keep working.
         """
         if not isinstance(v, str):
-            return v
+            return [normalise_origin(item) for item in v] if v else v
 
         text = v.strip()
         if text.startswith("["):
             try:
-                return json.loads(text)
+                parsed = json.loads(text)
             except json.JSONDecodeError:
                 pass  # fall through and treat it as comma-separated
-        return [origin.strip() for origin in text.split(",") if origin.strip()]
+            else:
+                return [normalise_origin(item) for item in parsed]
+
+        return [
+            normalise_origin(origin) for origin in text.split(",") if origin.strip()
+        ]
 
     @property
     def is_production(self) -> bool:
