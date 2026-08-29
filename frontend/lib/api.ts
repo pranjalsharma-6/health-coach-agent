@@ -105,9 +105,20 @@ async function request<T>(
   try {
     response = await fetch(`${API_BASE}${path}`, { ...options, headers });
   } catch {
+    // Name the address that failed. This message used to say "is the backend
+    // running on port 8000?" regardless of where it was deployed, which is
+    // wrong everywhere except a laptop — and worse, the two real causes look
+    // identical from inside the browser: an API URL that never reached the
+    // build (so it fell back to localhost), and a request the browser blocked
+    // for CORS. Printing the URL tells them apart without opening devtools.
+    const isLocal = /localhost|127\.0\.0\.1/.test(API_BASE);
     throw new ApiError(
       0,
-      "Can't reach the server. Is the backend running on port 8000?",
+      isLocal
+        ? `Can't reach the backend at ${API_BASE}. Is it running on port 8000?`
+        : `Can't reach the API at ${API_BASE}. It may still be waking up — a ` +
+          `free-tier server takes about 40 seconds cold. If this persists, the ` +
+          `browser may be blocking the request; check the console for a CORS message.`,
     );
   }
 
