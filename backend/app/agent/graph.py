@@ -70,7 +70,11 @@ from app.agent.prompts import (
 )
 from app.agent.state import AgentState, new_state, step
 from app.services.exercises import cue_for
-from app.agent.validators import build_retry_feedback, validate_plan
+from app.agent.validators import (
+    build_retry_feedback,
+    summarise_for_user,
+    validate_plan,
+)
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.repositories import (
@@ -79,7 +83,7 @@ from app.db.repositories import (
     PlanRepository,
     ProfileRepository,
 )
-from app.models.enums import AgentDecision
+from app.models.enums import AgentDecision, DietType
 from app.models.log import AgentEventInDB
 from app.models.plan import (
     ActivityItem,
@@ -152,8 +156,10 @@ async def sense_node(state: AgentState) -> Dict[str, Any]:
             step(
                 "sense",
                 "done",
-                f"Loaded profile ({profile.diet_type}, {profile.goal}) and "
-                f"{len(recent_logs)} days of logs.",
+                # `general_health` and `1 days` are how the database spells it,
+                # not how a person reads it.
+                f"Read your {DietType(profile.diet_type).label.lower()} profile "
+                f"and {_days(len(recent_logs))} of history.",
             )
         ],
     }
@@ -335,6 +341,11 @@ MEAL_CHUNK_DAYS = 4
 # hidden ones tells the user nothing they can act on, and hides the errors
 # that explain the visible one.
 MAX_ERRORS_SHOWN = 4
+
+
+def _days(count: int) -> str:
+    """Because "1 days" is the smallest possible sign that nobody read this."""
+    return "1 day" if count == 1 else f"{count} days"
 
 
 def meal_chunk_count() -> int:
@@ -729,7 +740,7 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
     )
 
     if result.is_valid:
-        message = "Plan passed all checks."
+        message = "Everything checks out."
         if result.warnings:
             # Say what the note is, not how many there are. A count is a
             # notification that something happened; the text is the thing the
@@ -737,13 +748,17 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
             # the case that matters.
             first = result.warnings[0]
             rest = len(result.warnings) - 1
-            message += f" Note: {first}" + (f" (+{rest} more)" if rest else "")
+            note = f" Note: {first}" + (f" (+{rest} more)" if rest else "")
+        else:
+            note = ""
         return {
             "validation_errors": [],
             "validation_warnings": result.warnings,
             "steps": [
                 step("validate", "running", "Checking the plan is safe and on-diet…"),
-                step("validate", "done", message),
+                # The note stays in the message: "this plan rotates sooner than
+                # you asked" is something the user acts on, not machinery.
+                step("validate", "done", message + note),
             ],
         }
 
@@ -761,7 +776,8 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
             step(
                 "validate",
                 "failed",
-                f"Rejected: {' · '.join(shown)}{extra}",
+                summarise_for_user(result),
+                detail=f"Rejected: {' · '.join(shown)}{extra}",
                 errors=result.errors,
             ),
         ],

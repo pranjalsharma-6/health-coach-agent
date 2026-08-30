@@ -304,6 +304,12 @@ export interface AgentStep {
   message: string;
   attempt?: number;
   decision?: string;
+  /**
+   * The same event, written for whoever maintains this: acceptance ranges,
+   * per-meal deltas, the keyword that matched. Folded away behind a toggle,
+   * because a safety net doing its job should not read like a fault.
+   */
+  detail?: string | null;
   /** Validation failures, on a `validate` step that rejected a plan. */
   errors?: string[];
   /** Run-level failure, present only on the terminal `complete` step. */

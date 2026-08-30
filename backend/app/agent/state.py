@@ -134,6 +134,11 @@ def step(node: str, status: str, message: str, **extra: Any) -> Dict[str, Any]:
     The trace is streamed to the browser, so the user watches the agent reason
     instead of staring at a spinner, and it's what makes a run auditable
     afterwards.
+
+    Pass `detail=` for anything written for whoever maintains this rather than
+    whoever uses it: acceptance ranges, per-meal deltas, the keyword that
+    matched. The interface keeps it folded away. Losing it entirely would make
+    the run unauditable, which is the one thing this trace exists for.
     """
     entry: Dict[str, Any] = {"node": node, "status": status, "message": message}
     entry.update(extra)

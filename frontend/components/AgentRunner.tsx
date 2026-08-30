@@ -81,6 +81,7 @@ export function AgentRunner({ onComplete, prompt }: Props) {
   // nothing happened. Derived rather than synced in an effect.
   const [promptAtRun, setPromptAtRun] = useState<string | null>(null);
   const [lineIndex, setLineIndex] = useState(0);
+  const [showDetail, setShowDetail] = useState(false);
 
   // Guards against a double-click starting two concurrent runs.
   const runningRef = useRef(false);
@@ -180,6 +181,16 @@ export function AgentRunner({ onComplete, prompt }: Props) {
 
       {error && <Alert tone="error">{error}</Alert>}
 
+      {steps.length > 0 && steps.some((s) => s.detail) && !running && (
+        <button
+          type="button"
+          onClick={() => setShowDetail((open) => !open)}
+          className="text-xs text-ink-muted underline underline-offset-2 hover:text-ink-soft"
+        >
+          {showDetail ? "Hide the details" : "Show what it checked"}
+        </button>
+      )}
+
       {steps.length > 0 && (
         <ol className="space-y-1 border-l-2 border-line ml-3 pl-5 py-1">
           {steps.map((step, i) => (
@@ -219,6 +230,12 @@ export function AgentRunner({ onComplete, prompt }: Props) {
               >
                 {step.message}
               </p>
+
+              {showDetail && step.detail && (
+                <p className="text-xs text-ink-muted mt-1 font-mono break-words">
+                  {step.detail}
+                </p>
+              )}
             </li>
           ))}
         </ol>

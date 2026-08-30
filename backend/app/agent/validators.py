@@ -241,10 +241,15 @@ def _check_day_totals(
         short = total_kcal < kcal_low
         gap = round(kcal_low - total_kcal) if short else round(total_kcal - kcal_high)
         per_meal = round(gap / len(day.meals)) if day.meals else gap
+        word = "MORE" if short else "LESS"
+
+        # A day two calories outside the range divides into "about 0 kcal more
+        # in every meal", which is not an instruction, it is a contradiction.
+        # Below a per-meal rounding error, ask for the day's total instead.
         direction = (
-            f"about {per_meal} kcal MORE in every meal"
-            if short
-            else f"about {per_meal} kcal LESS in every meal"
+            f"about {per_meal} kcal {word} in every meal"
+            if per_meal >= 5
+            else f"{gap} kcal {word} across the day, anywhere you like"
         )
         result.errors.append(
             f"Day {day.day} totals {total_kcal} kcal, "
@@ -313,6 +318,44 @@ def _check_meal_plausibility(
                 f"diet exceeds {protein_ceiling(diet):.2f} g/kcal, so this meal "
                 "cannot exist as described."
             )
+
+
+def summarise_for_user(result: ValidationResult) -> str:
+    """The rejection, said to the person waiting rather than to the model.
+
+    The full error text exists so the nutritionist can fix the exact problem,
+    and it reads like what it is: an acceptance range, a per-meal delta, a
+    keyword that matched. None of that is the user's business, and showing it
+    makes a safety net look like a fault.
+
+    What is worth telling them is that the plan was checked and sent back,
+    because that is the product working. So this names the day and the kind of
+    problem, and nothing else.
+    """
+    kinds: List[str] = []
+    for error in result.errors:
+        if "forbidden for a" in error or "declared allergen" in error:
+            kind = "something you don't eat"
+        elif "kcal" in error:
+            kind = "calories that missed the target"
+        elif "protein" in error:
+            kind = "too little protein"
+        elif "meals, expected" in error or "day" in error.lower():
+            kind = "the wrong shape"
+        else:
+            kind = "a problem"
+        if kind not in kinds:
+            kinds.append(kind)
+
+    if not kinds:
+        return "The plan did not pass its checks, so it went back for a redraw."
+
+    if len(kinds) == 1:
+        found = kinds[0]
+    else:
+        found = ", ".join(kinds[:-1]) + f" and {kinds[-1]}"
+
+    return f"Found {found}. Sent it back to be redrawn."
 
 
 def build_retry_feedback(result: ValidationResult) -> str:
