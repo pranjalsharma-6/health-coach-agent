@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, Button, cn } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
@@ -43,6 +43,31 @@ interface Props {
   prompt?: string | null;
 }
 
+/**
+ * Something to read while the kitchen works.
+ *
+ * A run takes twenty to forty seconds, longer if the API is waking from a
+ * cold start, and a spinner for that long reads as a hang. The streamed steps
+ * below say what the agent is doing; these say it is worth waiting for.
+ *
+ * Written to be true rather than cute. Kaya really is checking the diet
+ * rules, and really does throw a plan away when the arithmetic does not hold,
+ * so a line that says so teaches the product while it stalls.
+ */
+const WAITING_LINES = [
+  "Reading what you actually ate this week…",
+  "Arguing with itself about Thursday…",
+  "Checking every meal against your diet rules…",
+  "Counting protein, twice…",
+  "Nothing here is a stock plan. It is being written now…",
+  "Making sure the macros actually add up…",
+  "Picking movements you can do with what you have…",
+  "A second opinion on the whole week…",
+  "Throwing out anything that does not hold up…",
+];
+
+const LINE_INTERVAL_MS = 3200;
+
 export function AgentRunner({ onComplete, prompt }: Props) {
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [running, setRunning] = useState(false);
@@ -55,6 +80,7 @@ export function AgentRunner({ onComplete, prompt }: Props) {
   // every later prompt, so logging a skip after a successful run looks like
   // nothing happened. Derived rather than synced in an effect.
   const [promptAtRun, setPromptAtRun] = useState<string | null>(null);
+  const [lineIndex, setLineIndex] = useState(0);
 
   // Guards against a double-click starting two concurrent runs.
   const runningRef = useRef(false);
@@ -103,6 +129,20 @@ export function AgentRunner({ onComplete, prompt }: Props) {
 
   const decision = finished?.decision as AgentDecision | undefined;
 
+  // Rotate the waiting copy only while a run is in flight, and start from the
+  // top each time so the first line is always the one that makes sense first.
+  useEffect(() => {
+    if (!running) {
+      setLineIndex(0);
+      return;
+    }
+    const timer = setInterval(
+      () => setLineIndex((i) => (i + 1) % WAITING_LINES.length),
+      LINE_INTERVAL_MS,
+    );
+    return () => clearInterval(timer);
+  }, [running]);
+
   // A recommendation the current result doesn't already account for.
   const promptIsNew = prompt != null && prompt !== promptAtRun;
 
@@ -127,6 +167,16 @@ export function AgentRunner({ onComplete, prompt }: Props) {
           Rebuild from scratch
         </Button>
       </div>
+
+      {running && (
+        <p
+          key={lineIndex}
+          aria-live="polite"
+          className="text-sm text-ink-soft animate-fade-up"
+        >
+          {WAITING_LINES[lineIndex]}
+        </p>
+      )}
 
       {error && <Alert tone="error">{error}</Alert>}
 

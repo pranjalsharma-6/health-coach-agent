@@ -9,7 +9,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from app.models.common import MongoModel, utcnow
-from app.models.enums import AgentDecision, MealStatus
+from app.models.enums import AgentDecision, MealStatus, SessionStatus
 
 
 class MealLogEntry(BaseModel):
@@ -37,6 +37,27 @@ class MealLogRequest(BaseModel):
     note: Optional[str] = Field(default=None, max_length=500)
 
 
+class SessionLogEntry(BaseModel):
+    """What actually happened with the day's training.
+
+    One per day rather than per exercise. Nobody logs set by set on a phone,
+    and the agent only needs to know whether the session happened.
+    """
+
+    plan_day: int
+    status: SessionStatus
+    note: Optional[str] = None
+    logged_at: datetime = Field(default_factory=utcnow)
+
+
+class SessionLogRequest(BaseModel):
+    """Payload for logging the day's training from the UI."""
+
+    plan_day: int = Field(ge=1, le=31)
+    status: SessionStatus
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
 class DailyLogInDB(MongoModel):
     """One document per user per day."""
 
@@ -46,6 +67,7 @@ class DailyLogInDB(MongoModel):
     plan_day: Optional[int] = None
 
     meals: List[MealLogEntry] = Field(default_factory=list)
+    sessions: List[SessionLogEntry] = Field(default_factory=list)
 
     # Optional manual or wearable-sourced metrics.
     weight_kg: Optional[float] = None
@@ -96,6 +118,15 @@ class AdherenceSnapshot(BaseModel):
 
     steps: Optional[int] = None
     sleep_hours: Optional[float] = None
+
+    # Training. Counted separately from food because the two fail for
+    # different reasons and the fix for each is different: a plan whose meals
+    # are wrong needs different food, and a plan whose sessions are wrong needs
+    # different training.
+    session_planned: bool = False
+    session_done: bool = False
+    session_skipped: bool = False
+    session_skip_streak_days: int = 0
 
     # Multi-day signals. The difference between a bad day and a bad pattern.
     skip_streak_days: int = 0

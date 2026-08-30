@@ -13,6 +13,7 @@ import type {
   DailyLog,
   MealLogResponse,
   MealStatus,
+  SessionStatus,
   Plan,
   PlanSummary,
   Profile,
@@ -236,6 +237,16 @@ export const api = {
       note?: string | null;
     }) =>
       request<MealLogResponse>("/logs/meals", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    logSession: (payload: {
+      plan_day: number;
+      status: SessionStatus;
+      note?: string | null;
+    }) =>
+      request<MealLogResponse>("/logs/sessions", {
         method: "POST",
         body: JSON.stringify(payload),
       }),

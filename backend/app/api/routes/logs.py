@@ -16,12 +16,18 @@ from app.models.log import (
     DailyMetricsRequest,
     MealLogEntry,
     MealLogRequest,
+    SessionLogEntry,
+    SessionLogRequest,
 )
 from app.services.adherence import build_snapshot
 from app.services.nutrition import calculate_targets
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 logger = get_logger(__name__)
+
+# Consecutive skipped sessions before the training plan is treated as the
+# problem. Three, matching the meal rule: two is a bad week, three is a habit.
+STRUCTURAL_SESSION_SKIP_STREAK = 3
 
 
 class MealLogResponse(BaseModel):
@@ -83,6 +89,67 @@ async def log_meal(
         agent_recommended=recommended,
         agent_reason=reason,
     )
+
+
+@router.post("/sessions", response_model=MealLogResponse)
+async def log_session(
+    payload: SessionLogRequest,
+    user: CurrentUser,
+    profile: CurrentProfile,
+    log_date: Optional[date] = Query(default=None),
+) -> MealLogResponse:
+    """Record whether the day's training happened.
+
+    The counterpart to logging a meal, and it exists for the same reason: the
+    plan can only adapt to what it is told. Skipping sessions used to be
+    invisible, so a training plan nobody could follow was rewritten only when
+    the food happened to be wrong too.
+    """
+    user_id = str(user.id)
+    target_date = log_date or date.today()
+
+    log = await LogRepository.upsert_session(
+        user_id,
+        target_date,
+        SessionLogEntry(
+            plan_day=payload.plan_day, status=payload.status, note=payload.note
+        ),
+    )
+
+    snapshot = build_snapshot(
+        target_date=target_date,
+        targets=calculate_targets(profile),
+        plan=await PlanRepository.get_active(user_id),
+        today_log=log,
+        recent_logs=await LogRepository.get_recent(user_id, days=7),
+    )
+
+    recommended, reason = _should_suggest_agent_after_session(snapshot)
+
+    return MealLogResponse(
+        log=log,
+        snapshot=snapshot,
+        agent_recommended=recommended,
+        agent_reason=reason,
+    )
+
+
+def _should_suggest_agent_after_session(
+    snapshot: AdherenceSnapshot,
+) -> tuple[bool, Optional[str]]:
+    """One skipped session is a Tuesday. Three is a plan that does not fit.
+
+    Deliberately quieter than the meal rule. Missing a workout has no knock-on
+    effect on the rest of the day, so there is nothing to rebalance and
+    offering to replan after a single skip would be nagging.
+    """
+    if snapshot.session_skip_streak_days >= STRUCTURAL_SESSION_SKIP_STREAK:
+        return True, (
+            f"You've skipped training {snapshot.session_skip_streak_days} days "
+            "running. Kaya can rebuild the week around sessions you'll "
+            "actually do."
+        )
+    return False, None
 
 
 def _should_suggest_agent(

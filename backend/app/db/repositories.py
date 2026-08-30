@@ -13,7 +13,12 @@ from bson.errors import InvalidId
 
 from app.core.logging import get_logger
 from app.db.mongo import get_database
-from app.models.log import AgentEventInDB, DailyLogInDB, MealLogEntry
+from app.models.log import (
+    AgentEventInDB,
+    DailyLogInDB,
+    MealLogEntry,
+    SessionLogEntry,
+)
 from app.models.plan import PlanInDB
 from app.models.profile import ProfileInDB
 from app.models.user import UserInDB
@@ -212,6 +217,33 @@ class LogRepository:
             key,
             {
                 "$push": {"meals": entry.model_dump(mode="json")},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
+            },
+        )
+        doc = await db.daily_logs.find_one(key)
+        return DailyLogInDB.from_mongo(doc)
+
+    @staticmethod
+    async def upsert_session(
+        user_id: str, log_date: date, entry: SessionLogEntry
+    ) -> DailyLogInDB:
+        """Record the day's training outcome, replacing any earlier entry.
+
+        Keyed on the plan day rather than the date so that re-logging corrects
+        instead of stacking, the same way meals do.
+        """
+        db = get_database()
+        key = {"user_id": user_id, "log_date": _iso_date(log_date)}
+
+        await LogRepository.get_or_create(user_id, log_date)
+
+        await db.daily_logs.update_one(
+            key, {"$pull": {"sessions": {"plan_day": entry.plan_day}}}
+        )
+        await db.daily_logs.update_one(
+            key,
+            {
+                "$push": {"sessions": entry.model_dump(mode="json")},
                 "$set": {"updated_at": datetime.now(timezone.utc)},
             },
         )

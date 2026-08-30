@@ -42,6 +42,16 @@ export type BudgetTier = "low" | "medium" | "high";
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 export type MealStatus = "planned" | "eaten" | "skipped" | "substituted";
 
+export type SessionStatus = "planned" | "done" | "skipped";
+
+/** Whether the day's training happened. One entry per plan day, not per set. */
+export interface SessionLogEntry {
+  plan_day: number;
+  status: SessionStatus;
+  note: string | null;
+  logged_at: string;
+}
+
 /**
  * What someone ate instead of the planned meal.
  *
@@ -262,6 +272,7 @@ export interface DailyLog {
   user_id: string;
   log_date: string;
   meals: MealLogEntry[];
+  sessions: SessionLogEntry[];
   weight_kg: number | null;
   steps: number | null;
   sleep_hours: number | null;

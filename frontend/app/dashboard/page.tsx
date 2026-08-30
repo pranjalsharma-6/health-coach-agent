@@ -35,6 +35,7 @@ import type {
   MealStatus,
   MealSwap,
   Plan,
+  SessionStatus,
   Profile,
   TargetsResponse,
   WeightPoint,
@@ -171,6 +172,12 @@ export default function DashboardPage() {
     return map;
   }, [log]);
 
+  const sessionStatus = useMemo<SessionStatus>(() => {
+    const day = plan?.daily_plans[selectedDay];
+    const entry = log?.sessions?.find((s) => s.plan_day === day?.day);
+    return entry?.status ?? "planned";
+  }, [log, plan, selectedDay]);
+
   const handleLogMeal = useCallback(
     async (mealId: string, status: MealStatus, swap?: MealSwap) => {
       try {
@@ -188,6 +195,23 @@ export default function DashboardPage() {
         setError(
           err instanceof ApiError ? err.message : "Couldn't save that.",
         );
+      }
+    },
+    [],
+  );
+
+  const handleLogSession = useCallback(
+    async (planDay: number, status: SessionStatus) => {
+      try {
+        const result = await api.logs.logSession({
+          plan_day: planDay,
+          status,
+        });
+        setLog(result.log);
+        setSnapshot(result.snapshot);
+        setAgentPrompt(result.agent_recommended ? result.agent_reason : null);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Couldn't save that.");
       }
     },
     [],
@@ -361,7 +385,13 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="px-5 py-4 space-y-3">
-                  <SessionCard activity={day.activity} />
+                  <SessionCard
+                    activity={day.activity}
+                    planDay={day.day}
+                    status={sessionStatus}
+                    onLog={handleLogSession}
+                    loggable={isToday}
+                  />
 
                   {day.meals.map((meal) => (
                     <MealCard

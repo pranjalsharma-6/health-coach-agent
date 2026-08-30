@@ -115,6 +115,10 @@ MAX_CRITIQUE_ROUNDS = 1
 # Skipping meals this many days running means the plan doesn't fit their life.
 STRUCTURAL_SKIP_STREAK = 3
 
+# The same threshold for training. Two skipped sessions is a bad week; three
+# consecutive is a plan asking for something the user cannot give it.
+STRUCTURAL_SESSION_SKIP_STREAK = 3
+
 # Minimum logged meals before the 7-day adherence rate is trusted as a signal.
 MIN_MEALS_FOR_ADHERENCE_RULE = 8
 
@@ -224,6 +228,22 @@ def _choose_action(state, snapshot, plan, targets) -> tuple[AgentDecision, str]:
                 f"You've skipped meals {snapshot.skip_streak_days} days running. "
                 "That's a sign the plan doesn't fit your routine, so I'm changing "
                 "its shape rather than asking you to try harder."
+            ),
+        )
+
+    # 3b. The same rule for training. Kept separate from meals rather than
+    # folded into one adherence number, because the two fail for different
+    # reasons and the rationale has to say which: a plan whose food is wrong
+    # needs different meals, and a plan whose sessions are wrong needs
+    # different training. Averaging them would produce a replan that explains
+    # nothing.
+    if snapshot.session_skip_streak_days >= STRUCTURAL_SESSION_SKIP_STREAK:
+        return (
+            AgentDecision.STRUCTURAL_REPLAN,
+            (
+                f"You've skipped training {snapshot.session_skip_streak_days} "
+                "days running. Rebuilding the week around sessions that fit "
+                "the time and equipment you actually have."
             ),
         )
 

@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from typing import List, Optional
 
 from app.core.logging import get_logger
-from app.models.enums import MealStatus
+from app.models.enums import MealStatus, SessionStatus
 from app.models.log import AdherenceSnapshot, DailyLogInDB
 from app.models.plan import NutritionTargets, PlanInDB
 
@@ -66,6 +66,18 @@ def build_snapshot(
 
     adherence_rate, meals_logged = _adherence_rate(recent_logs)
 
+    session = next(
+        (
+            entry
+            for entry in (today_log.sessions if today_log else [])
+            if plan_day_number is not None and entry.plan_day == plan_day_number
+        ),
+        None,
+    )
+    has_session = bool(
+        plan_day and plan_day.activity and plan_day.activity.duration_minutes > 0
+    )
+
     return AdherenceSnapshot(
         date=target_date,
         plan_day=plan_day_number,
@@ -81,6 +93,11 @@ def build_snapshot(
         protein_remaining_g=targets.protein_g - protein_consumed,
         steps=today_log.steps if today_log else None,
         sleep_hours=today_log.sleep_hours if today_log else None,
+        session_planned=has_session,
+        session_done=session is not None and session.status == SessionStatus.DONE,
+        session_skipped=session is not None
+        and session.status == SessionStatus.SKIPPED,
+        session_skip_streak_days=_session_skip_streak(recent_logs, target_date),
         skip_streak_days=_skip_streak(recent_logs, target_date),
         skips_last_7_days=_count_skips(recent_logs),
         adherence_rate_7d=adherence_rate,
@@ -116,6 +133,30 @@ def _skip_streak(logs: List[DailyLogInDB], target_date: date) -> int:
         if log is None:
             break
         if not any(m.status == MealStatus.SKIPPED for m in log.meals):
+            break
+        streak += 1
+        cursor -= timedelta(days=1)
+
+    return streak
+
+
+def _session_skip_streak(logs: List[DailyLogInDB], target_date: date) -> int:
+    """Consecutive days ending today on which the session was skipped.
+
+    Days with no session logged at all end the streak rather than continuing
+    it. Not logging is not the same as not training, and treating silence as a
+    skip would let the agent rewrite a training plan someone is quietly
+    following.
+    """
+    by_date = {log.log_date: log for log in logs}
+    streak = 0
+    cursor = target_date
+
+    while True:
+        log = by_date.get(cursor)
+        if log is None or not log.sessions:
+            break
+        if not any(s.status == SessionStatus.SKIPPED for s in log.sessions):
             break
         streak += 1
         cursor -= timedelta(days=1)
@@ -167,6 +208,14 @@ def describe_snapshot(snapshot: AdherenceSnapshot) -> str:
         parts.append(f"{snapshot.meals_skipped} skipped today")
     if snapshot.skip_streak_days > 1:
         parts.append(f"{snapshot.skip_streak_days}-day skip streak")
+    if snapshot.session_skipped:
+        parts.append("training skipped")
+    elif snapshot.session_done:
+        parts.append("training done")
+    if snapshot.session_skip_streak_days > 1:
+        parts.append(
+            f"{snapshot.session_skip_streak_days}-day training skip streak"
+        )
     if snapshot.adherence_rate_7d < 1.0:
         parts.append(f"{snapshot.adherence_rate_7d:.0%} 7-day adherence")
     if snapshot.steps is not None:

@@ -164,6 +164,20 @@ class MealStatus(str, Enum):
     SUBSTITUTED = "substituted"
 
 
+class SessionStatus(str, Enum):
+    """Lifecycle of a planned training session.
+
+    Deliberately the same shape as MealStatus minus the substitution: swapping
+    a run for a swim is a real thing people do, but it changes nothing the
+    agent computes, whereas swapping a meal changes the day's calories. Adding
+    a field the loop cannot read would be a checkbox, not a feature.
+    """
+
+    PLANNED = "planned"
+    DONE = "done"
+    SKIPPED = "skipped"
+
+
 class AgentDecision(str, Enum):
     """The four actions the agent can take after evaluating progress.
 
