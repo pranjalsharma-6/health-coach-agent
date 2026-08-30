@@ -3,7 +3,7 @@
 There used to be two implementations: a calendar-date difference on the server
 and elapsed-milliseconds-over-24-hours on the client. They disagree for the
 window after midnight but before the 24-hour mark, and the disagreement is
-invisible — the client renders one day's meals while the server computes
+invisible. The client renders one day's meals while the server computes
 adherence against another. Since the two are matched by meal_id, nothing lines
 up: every logged meal reads as unlogged, and the header sits at "0 of 4 eaten"
 while each card shows "Eaten".
@@ -19,7 +19,7 @@ class TestPlanDayIsPublished:
 
     Adherence is computed against one day's meals, matched by meal_id. If the
     client renders a different day, none of the ids the server counted appear
-    on screen — the header reads "0 of 4 eaten" while every card shows "Eaten".
+    on screen. The header reads "0 of 4 eaten" while every card shows "Eaten".
     Publishing the resolved day removes the second implementation.
     """
 
@@ -46,7 +46,7 @@ class TestPlanDayIsPublished:
         assert self._snapshot(created, created).plan_day == 1
 
     def test_it_advances_with_the_calendar_not_the_clock(self):
-        """A plan created at 23:00 is on day 2 at 01:00 the next morning — two
+        """A plan created at 23:00 is on day 2 at 01:00 the next morning. Two
         hours later. Dividing elapsed milliseconds by 24 hours says day 1, and
         that disagreement is the bug."""
         created = date(2026, 3, 15)
@@ -171,7 +171,7 @@ class TestConfigurablePlanLength:
     """Plan length is a setting, not a constant.
 
     Seven days costs roughly 7500 tokens of an 8000-per-minute free tier,
-    leaving nothing for the retry the agent is designed around — so the default
+    leaving nothing for the retry the agent is designed around, so the default
     is four, and anyone whose provider allows more can raise it without a code
     change.
     """
@@ -190,7 +190,7 @@ class TestConfigurablePlanLength:
     def test_no_single_request_can_be_refused_outright(self):
         """The invariant that must never break, at any profile size.
 
-        A 429 is waited out by `_RateLimitRetrying`; a 413 is not — a provider
+        A 429 is waited out by `_RateLimitRetrying`; a 413 is not. A provider
         refuses a request whose reservation alone crowds the per-minute limit,
         and that refusal is final. So the retry escalation has a hard ceiling:
         growth that cures a truncation by asking for 7000 tokens would trade a
@@ -206,7 +206,7 @@ class TestConfigurablePlanLength:
             )
             assert worst < self.FREE_TIER_TPM, (
                 f"{meals_per_day} meals/day reserves {worst} tokens on its last "
-                f"attempt against a {self.FREE_TIER_TPM} limit — the provider "
+                f"attempt against a {self.FREE_TIER_TPM} limit. The provider "
                 "will refuse it with a 413, which is not retried"
             )
 
@@ -216,7 +216,7 @@ class TestConfigurablePlanLength:
         This used to demand that a first attempt *and* a retry fit the same
         minute. That goal is gone, and deliberately: meeting it meant reserving
         1900 tokens for a plan whose JSON measures 1631, leaving nothing for the
-        model to think with — so the first attempt truncated every time and the
+        model to think with, so the first attempt truncated every time and the
         retry it had saved room for was spent re-failing. Fitting two cheap
         attempts is worth nothing next to one that works.
 
@@ -235,7 +235,7 @@ class TestConfigurablePlanLength:
 
         assert first <= self.FREE_TIER_TPM, (
             f"the default profile's first attempt reserves {first} tokens "
-            f"against a {self.FREE_TIER_TPM} limit — the happy path would be "
+            f"against a {self.FREE_TIER_TPM} limit. The happy path would be "
             "rate limited before it ever succeeded"
         )
 
@@ -252,7 +252,7 @@ class TestConfigurablePlanLength:
 
     def test_the_stored_plan_records_its_own_length(self):
         """A plan generated under one setting must keep working if the setting
-        changes — `_resolve_plan_day` counts against the plan, not the config."""
+        changes. `_resolve_plan_day` counts against the plan, not the config."""
         from tests.factories import make_health_plan, make_targets
 
         plan = make_health_plan(make_targets(), days=4)

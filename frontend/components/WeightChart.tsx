@@ -1,14 +1,14 @@
 "use client";
 
 /**
- * Weight trend — a single-series line chart over time.
+ * Weight trend. A single-series line chart over time.
  *
  * Deliberately hand-rolled SVG rather than a charting library: one series and a
  * reference line don't justify 40kB of dependency, and it keeps the mark specs
  * (2px stroke, 8px end marker with a surface ring, hairline recessive grid)
  * under direct control.
  *
- * Series colour is `#5d9174` (Kaya brand-500) in both themes — it clears the
+ * Series colour is `#5d9174` (Kaya brand-500) in both themes. It clears the
  * lightness band, chroma floor and 3:1 contrast against the light card (#ffffff)
  * and the dark card (#1c1a16). The deeper brand-600 reads gray (chroma 0.089)
  * and was rejected.
@@ -85,14 +85,14 @@ export function WeightChart({ points, targetKg }: Props) {
     };
   }, [data, targetKg]);
 
-  // One point is a current value, not a trend — a one-point line chart is a
+  // One point is a current value, not a trend. A one-point line chart is a
   // form error. Fall back to a stat tile.
   if (data.length === 0) {
     return (
       <EmptyState
         emoji="⚖️"
         title="No weigh-ins yet"
-        description="Log your weight below. Once there are a few entries, your trend appears here — real data only, never a simulated line."
+        description="Log your weight below. Once there are a few entries, your trend appears here. Real data only, never a simulated line."
       />
     );
   }
@@ -169,7 +169,7 @@ export function WeightChart({ points, targetKg }: Props) {
             setHoverIndex(nearest);
           }}
         >
-          {/* Gridlines — hairline, solid, recessive. */}
+          {/* Gridlines: hairline, solid, recessive. */}
           {ticks.map((tick) => (
             <g key={tick}>
               <line
@@ -193,7 +193,7 @@ export function WeightChart({ points, targetKg }: Props) {
             </g>
           ))}
 
-          {/* Target — a goal, so recessive and dashed, never a second series. */}
+          {/* Target: a goal, so recessive and dashed, never a second series. */}
           {targetKg != null && targetKg >= scale.lo && targetKg <= scale.hi && (
             <g>
               <line
@@ -217,7 +217,7 @@ export function WeightChart({ points, targetKg }: Props) {
             </g>
           )}
 
-          {/* Crosshair — readers aim at a date, not at a 2px line. */}
+          {/* Crosshair: readers aim at a date, not at a 2px line. */}
           {active && (
             <line
               x1={scale.x(active.t)}
@@ -263,7 +263,7 @@ export function WeightChart({ points, targetKg }: Props) {
             />
           )}
 
-          {/* Value at the line end — labelled selectively, never every point. */}
+          {/* Value at the line end: labelled selectively, never every point. */}
           <text
             x={scale.x(last.t) + 10}
             y={scale.y(last.weight_kg)}
@@ -298,7 +298,7 @@ export function WeightChart({ points, targetKg }: Props) {
               top: `${(scale.y(active.weight_kg) / H) * 100}%`,
             }}
           >
-            {/* Value leads, label follows — the reader has the series already. */}
+            {/* Value leads, label follows: the reader has the series already. */}
             <p className="text-sm font-semibold text-ink tabular-nums">
               {active.weight_kg} kg
             </p>

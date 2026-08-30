@@ -1,11 +1,11 @@
-"""Plan models — the agent's structured output and its stored form.
+"""Plan models. The agent's structured output and its stored form.
 
 Design note on recipes:
     A full 7-day plan with complete recipes for every meal is ~8k output tokens,
     which is slow and a reliability risk for structured generation. So the planner
     emits meals with names, macros and a one-line description, and full recipe
     detail is expanded lazily per-meal through a separate endpoint. Users open
-    maybe three recipes a week — generating 28 up front is waste.
+    maybe three recipes a week. Generating 28 up front is waste.
 """
 
 import re
@@ -78,8 +78,8 @@ class RecipeIngredient(BaseModel):
 
     Structured rather than free text so a meal's macros can be *computed* from
     what's actually in it, instead of only bounded by what's physically
-    possible. `quantity_g` may be None for things that resist weighing —
-    "a pinch of hing", "2 green chillies" — which the analyser then skips.
+    possible. `quantity_g` may be None for things that resist weighing.
+    "A pinch of hing", "2 green chillies", which the analyser then skips.
     """
 
     item: str = Field(
@@ -133,7 +133,7 @@ class MealItem(BaseModel):
     carbs_g: int = Field(description="Estimated carbohydrate in grams.")
     fat_g: int = Field(description="Estimated fat in grams.")
 
-    # Populated lazily — not generated with the plan.
+    # Populated lazily, not generated with the plan.
     recipe: Optional[Recipe] = None
 
     # Runtime state, set by the user rather than the planner.
@@ -168,7 +168,7 @@ class ExercisePrescription(BaseModel):
     cue: Optional[str] = Field(
         default=None,
         description=(
-            "One short form cue. Left empty is fine — the table's own cue is "
+            "One short form cue. Left empty is fine. The table's own cue is "
             "used, which is more reliable than a generated one."
         ),
     )
@@ -178,7 +178,7 @@ class ActivityItem(BaseModel):
     """The day's movement prescription."""
 
     activity_type: str = Field(
-        description="e.g. 'Strength training — full body', 'Easy cardio', 'Rest'."
+        description="e.g. 'Strength training. Full body', 'Easy cardio', 'Rest'."
     )
     duration_minutes: int = Field(description="Suggested duration; 0 for a rest day.")
     intensity: str = Field(description="One of: low, moderate, high.")
@@ -201,7 +201,7 @@ class DailyPlan(BaseModel):
 
 
 class NutritionTargets(BaseModel):
-    """Daily targets, computed deterministically — never by the LLM."""
+    """Daily targets, computed deterministically. Never by the LLM."""
 
     calories_kcal: int
     protein_g: int
@@ -248,8 +248,8 @@ class MealDraftItem(BaseModel):
     planner's to invent, and every field in a structured-output schema is
     something the model has to reason about and the provider has to constrain.
 
-    Dropping them, and `meal_id` — a deterministic string that code can build
-    more reliably than a model can — takes the schema from 1142 tokens to a
+    Dropping them, and `meal_id`. A deterministic string that code can build
+    more reliably than a model can. Takes the schema from 1142 tokens to a
     fraction of that. Small structured outputs are the reliable ones; the meal
     schema was the one place that principle was not being applied.
     """
@@ -330,7 +330,7 @@ class ExerciseDraft(BaseModel):
 
     No `cue`: the table's form cue is filled in during assembly and is more
     reliable than a generated one, so asking for it produced 35 fields of
-    `"cue": null` per week — pure output the model had to emit correctly for
+    `"cue": null` per week. Pure output the model had to emit correctly for
     no benefit. In json_mode nothing constrains the output, and a long nested
     array is where a model drifts and stops closing its braces.
     """
@@ -369,7 +369,7 @@ class ActivityDraft(BaseModel):
     """
 
     activity_type: str = Field(
-        description="e.g. 'Strength training — full body', 'Easy cardio', 'Rest'."
+        description="e.g. 'Strength training. Full body', 'Easy cardio', 'Rest'."
     )
     duration_minutes: int = Field(description="Suggested duration; 0 for a rest day.")
     intensity: str = Field(description="One of: low, moderate, high.")
@@ -402,7 +402,7 @@ class TrainingPlanDraft(BaseModel):
     reasoning: str = Field(
         description=(
             "Two to three sentences on why this training week is shaped this "
-            "way — the split, the progression, and where recovery sits."
+            "way. The split, the progression, and where recovery sits."
         )
     )
     days: List[DayTraining]
@@ -422,7 +422,7 @@ class PlanCritique(BaseModel):
     issues: List[str] = Field(
         default_factory=list,
         description=(
-            "Specific, actionable problems — a missing rest day, leg training "
+            "Specific, actionable problems. A missing rest day, leg training "
             "the morning after a long run, elaborate cooking on the user's "
             "busiest days. Empty when approved."
         ),
@@ -449,7 +449,7 @@ class PlanInDB(MongoModel):
     daily_plans: List[DailyPlan]
     targets: NutritionTargets
 
-    # Provenance — why this version exists.
+    # Provenance. Why this version exists.
     trigger: AgentDecision = AgentDecision.CREATE_INITIAL
     trigger_detail: Optional[str] = None
     parent_plan_id: Optional[str] = None

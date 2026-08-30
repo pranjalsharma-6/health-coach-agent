@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const me = await api.auth.me();
         if (!cancelled) setUser(me);
       } catch (error) {
-        // An expired or tampered token — drop it silently.
+        // An expired or tampered token. Drop it silently.
         if (error instanceof ApiError && error.isAuthError) clearToken();
       } finally {
         if (!cancelled) setLoading(false);

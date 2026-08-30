@@ -1,6 +1,6 @@
 """Password hashing and JWT token handling.
 
-Uses `bcrypt` directly rather than passlib — passlib's bcrypt backend has known
+Uses `bcrypt` directly rather than passlib. Passlib's bcrypt backend has known
 version-detection breakage against bcrypt >= 4.1, and we only need two functions.
 """
 
@@ -35,7 +35,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
             plain_password.encode("utf-8"), hashed_password.encode("utf-8")
         )
     except (ValueError, TypeError):
-        # Malformed hash in the database — treat as a failed login, not a crash.
+        # Malformed hash in the database. Treat as a failed login, not a crash.
         return False
 
 

@@ -1,7 +1,7 @@
 """Scenario definitions for the agent evaluation suite.
 
 A test asserts that code does what it does. An eval measures whether the agent
-*decides well* across the situations it will actually meet — and, importantly,
+*decides well* across the situations it will actually meet, and, importantly,
 records the cases it currently gets wrong instead of quietly omitting them.
 
 Everything here is deterministic: the decision rules are plain Python, so the
@@ -40,7 +40,7 @@ class DecisionScenario:
     situation: str
     expected: AgentDecision
     build: Callable[[], tuple]
-    #: Why this case matters — printed in the report so the suite is readable
+    #: Why this case matters. Printed in the report so the suite is readable
     #: as documentation of the agent's intended behaviour.
     rationale: str = ""
 
@@ -144,7 +144,7 @@ def _low_adherence_large_sample():
 
 
 def _low_adherence_tiny_sample():
-    """One skip out of two logged meals reads as 50% — but proves nothing."""
+    """One skip out of two logged meals reads as 50%, but proves nothing."""
     targets = make_targets()
     plan = make_plan_in_db(targets, reference_date=TODAY)
     log = make_log(
@@ -225,7 +225,7 @@ DECISION_SCENARIOS: List[DecisionScenario] = [
         situation="Just onboarded, no plan exists",
         expected=AgentDecision.CREATE_INITIAL,
         build=_no_plan,
-        rationale="Nothing to adapt yet — build the first week.",
+        rationale="Nothing to adapt yet. Build the first week.",
     ),
     DecisionScenario(
         name="on_track",
@@ -271,7 +271,7 @@ DECISION_SCENARIOS: List[DecisionScenario] = [
     ),
     DecisionScenario(
         name="low_adherence_insufficient_evidence",
-        situation="1 skip out of 2 logged meals — 50%, but n=2",
+        situation="1 skip out of 2 logged meals. 50%, but n=2",
         expected=AgentDecision.REBALANCE_DAY,
         build=_low_adherence_tiny_sample,
         rationale=(
@@ -393,7 +393,7 @@ def _impossible_protein_density(plan: HealthPlan, _targets: NutritionTargets) ->
     """Macros that reconcile perfectly but describe an impossible food.
 
     200 kcal of pure protein is exactly 50g by the 4 kcal/g rule, so the
-    reconciliation check is satisfied — but 0.25 g/kcal is beyond anything a
+    reconciliation check is satisfied, but 0.25 g/kcal is beyond anything a
     vegetarian diet can reach.
     """
     meal = plan.daily_plans[0].meals[0]
@@ -404,7 +404,7 @@ def _impossible_protein_density(plan: HealthPlan, _targets: NutritionTargets) ->
 
 
 def _lean_meat_density(plan: HealthPlan, _targets: NutritionTargets) -> None:
-    """Chicken-breast density — high, but entirely real."""
+    """Chicken-breast density. High, but entirely real."""
     meal = plan.daily_plans[0].meals[1]
     meal.name = "Grilled chicken breast with salad"
     meal.calories_kcal = 330

@@ -1,7 +1,7 @@
 /**
  * Display labels and descriptions for the domain enums.
  *
- * Kept out of components so the same wording appears everywhere — the
+ * Kept out of components so the same wording appears everywhere. The
  * onboarding wizard, the profile editor and the dashboard header all read
  * from here.
  */

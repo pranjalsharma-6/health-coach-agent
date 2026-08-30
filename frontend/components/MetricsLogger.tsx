@@ -33,7 +33,7 @@ export function MetricsLogger({ today, onSaved }: Props) {
     setError(null);
     setSaved(false);
 
-    // Only send fields the user actually filled in — an empty box means
+    // Only send fields the user actually filled in. An empty box means
     // "no reading", not zero.
     const payload: Record<string, number> = {};
     if (weight.trim()) payload.weight_kg = Number(weight);

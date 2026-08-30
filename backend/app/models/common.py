@@ -46,7 +46,7 @@ class MongoModel(BaseModel):
 def _bson_safe(value: Any) -> Any:
     """Recursively convert values BSON can't encode.
 
-    BSON has no bare-date type — only datetime — so a `datetime.date` anywhere
+    BSON has no bare-date type. Only datetime, so a `datetime.date` anywhere
     in a document (a nested adherence snapshot, say) raises on insert. Dates
     become ISO strings, which also sort correctly, matching how `log_date` is
     stored and queried.

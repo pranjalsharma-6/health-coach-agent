@@ -1,7 +1,7 @@
 """Output validation for generated plans.
 
 Structured output guarantees a plan is *well-formed*. It says nothing about
-whether the plan is *correct* — a schema-valid plan can still serve chicken to a
+whether the plan is *correct*. A schema-valid plan can still serve chicken to a
 vegetarian, miss the protein target by 40g, or claim 50g of protein from a bowl
 of rice.
 
@@ -27,7 +27,7 @@ from app.services.nutrition import (
 
 logger = get_logger(__name__)
 
-# A plan shorter than this cannot rotate meaningfully — two days of food on
+# A plan shorter than this cannot rotate meaningfully. Two days of food on
 # repeat is not a plan, it is a pair of menus.
 MIN_USABLE_PLAN_DAYS = 3
 
@@ -102,14 +102,14 @@ def _check_structure(
         result.errors.append("Plan contains no days.")
         return
 
-    # A short plan used to pass every check below — the numbering of [1, 2] is
-    # perfectly sequential — so a two-day plan shipped as a week.
+    # A short plan used to pass every check below. The numbering of [1, 2] is
+    # perfectly sequential, so a two-day plan shipped as a week.
     #
     # But requiring the exact count throws away good plans. Models reliably
     # come up one day short on this kind of output, and a correct three-day
     # plan is worth far more to the user than a fourth attempt that also fails.
     # Plans record their own length and day resolution counts against the plan
-    # rather than the request, so a short plan is coherent — it simply rotates
+    # rather than the request, so a short plan is coherent. It simply rotates
     # sooner. Only a plan too short to be a plan is rejected.
     if expected_days is not None:
         actual = len(plan.daily_plans)
@@ -161,7 +161,7 @@ def _check_structure(
 
 
 # --------------------------------------------------------------------------- #
-# Diet compliance — the most important check
+# Diet compliance. The most important check
 # --------------------------------------------------------------------------- #
 def _searchable_text(day: DailyPlan) -> List[tuple[str, str]]:
     """Return (label, text) pairs to scan for forbidden ingredients."""
@@ -231,10 +231,28 @@ def _check_day_totals(
     kcal_high = targets.calories_kcal * (1 + CALORIE_TOLERANCE)
 
     if not kcal_low <= total_kcal <= kcal_high:
+        # Say which way and by how much, per meal.
+        #
+        # "2320, outside 2504-3188" leaves the model to work out that it must go
+        # up, and by how much, and across how many meals, and it kept getting
+        # that wrong in the same direction, so three attempts all landed short.
+        # Models are far better at "add roughly 46 kcal to each meal" than at
+        # inferring arithmetic from a range.
+        short = total_kcal < kcal_low
+        gap = round(kcal_low - total_kcal) if short else round(total_kcal - kcal_high)
+        per_meal = round(gap / len(day.meals)) if day.meals else gap
+        direction = (
+            f"about {per_meal} kcal MORE in every meal"
+            if short
+            else f"about {per_meal} kcal LESS in every meal"
+        )
         result.errors.append(
-            f"Day {day.day} totals {total_kcal} kcal, outside the acceptable range "
+            f"Day {day.day} totals {total_kcal} kcal, "
+            f"{'short of' if short else 'over'} the acceptable range "
             f"{round(kcal_low)}-{round(kcal_high)} for a "
-            f"{targets.calories_kcal} kcal target."
+            f"{targets.calories_kcal} kcal target. "
+            f"Day {day.day} needs {direction}. Bigger portions and more "
+            "calorie-dense ingredients, not more meals."
         )
 
     # Under-shooting protein is a real failure; overshooting it is fine.
@@ -258,7 +276,7 @@ def _check_meal_plausibility(
     for meal in day.meals:
         if meal.calories_kcal > max_meal_kcal:
             result.warnings.append(
-                f"Day {day.day} {meal.meal_type} is {meal.calories_kcal} kcal — "
+                f"Day {day.day} {meal.meal_type} is {meal.calories_kcal} kcal. "
                 f"over {int(MAX_SINGLE_MEAL_FRACTION * 100)}% of the day in one sitting."
             )
 
@@ -279,7 +297,7 @@ def _check_meal_plausibility(
         if drift > MACRO_RECONCILE_TOLERANCE:
             result.errors.append(
                 f"Day {day.day} {meal.meal_type} ('{meal.name}') claims "
-                f"{meal.calories_kcal} kcal but its macros total {derived} kcal — "
+                f"{meal.calories_kcal} kcal but its macros total {derived} kcal. "
                 "these are inconsistent."
             )
 
@@ -312,9 +330,11 @@ def build_retry_feedback(result: ValidationResult) -> str:
     lines.extend(
         [
             "",
-            "Regenerate the ENTIRE plan, fixing every problem above. Pay particular "
-            "attention to diet restrictions and to making each day's calorie and "
-            "protein totals land within tolerance of the targets.",
+            "Regenerate the ENTIRE plan, fixing every problem above. Where a "
+            "day is short on calories, the fix is larger portions and richer "
+            "ingredients: oils, nuts, dairy, paneer. Not extra meals, since the "
+            "meal count is fixed. Add up each day's meals before you answer "
+            "and check the total against the target.",
         ]
     )
     return "\n".join(lines)
@@ -332,7 +352,7 @@ def _check_training_session(
     deterministic code checks the choice is feasible. What counts as good
     programming is the model's to argue; what counts as *followable* is not.
 
-    A missing session is an error rather than a warning — "Strength training,
+    A missing session is an error rather than a warning. "Strength training,
     45 min" with no exercises is the exact failure this exists to stop, and it
     was the shipped behaviour.
     """

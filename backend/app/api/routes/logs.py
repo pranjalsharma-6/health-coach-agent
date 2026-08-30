@@ -1,4 +1,4 @@
-"""Meal and metric logging — the sensing surface of the agent loop."""
+"""Meal and metric logging. The sensing surface of the agent loop."""
 
 from datetime import date, timedelta
 from typing import List, Optional
@@ -28,7 +28,7 @@ class MealLogResponse(BaseModel):
     """Confirms the log and tells the frontend whether to run the agent.
 
     Returning `agent_recommended` here saves the client from re-deriving the
-    trigger conditions — the rules live in one place, on the server.
+    trigger conditions. The rules live in one place, on the server.
     """
 
     log: DailyLogInDB
@@ -98,7 +98,7 @@ def _should_suggest_agent(
 
     if snapshot.skip_streak_days >= 3:
         return True, (
-            f"You've skipped meals {snapshot.skip_streak_days} days running — "
+            f"You've skipped meals {snapshot.skip_streak_days} days running. "
             "Kaya can restructure the plan to fit your routine better."
         )
 
@@ -137,7 +137,7 @@ async def get_adherence(
     profile: CurrentProfile,
     log_date: Optional[date] = Query(default=None),
 ) -> AdherenceSnapshot:
-    """The current adherence picture — computed, never model-generated."""
+    """The current adherence picture. Computed, never model-generated."""
     user_id = str(user.id)
     target_date = log_date or date.today()
 
@@ -161,7 +161,7 @@ async def get_weight_series(
 ) -> List[WeightPoint]:
     """Real logged weights for the progress chart.
 
-    Note this returns only what the user actually recorded — the Streamlit
+    Note this returns only what the user actually recorded. The Streamlit
     version generated a synthetic trend line, which looked good and meant
     nothing. An empty list here is honest.
     """

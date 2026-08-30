@@ -25,14 +25,14 @@
 
 Three things make this a real state machine rather than decoration:
 
-1. `decide` genuinely branches — four outcomes, chosen from computed evidence,
+1. `decide` genuinely branches. Four outcomes, chosen from computed evidence,
    producing structurally different actions.
 2. Two specialists run **concurrently** in the same superstep. A nutritionist
    plans food and a trainer plans movement, each seeing only the constraints
    its own half needs, so neither prompt has to carry the other's. Splitting
    them keeps each output small, and small structured outputs are the reliable
    ones.
-3. Control flows *backwards* twice — from `critique` and from `validate` — so a
+3. Control flows *backwards* twice. From `critique` and from `validate`, so a
    plan gets revised with specific feedback rather than regenerated blind.
 
 The ordering of the last two matters: the critic is an LLM and only advises,
@@ -51,6 +51,7 @@ from langgraph.graph import END, StateGraph
 from app.agent.llm import (
     LLMUnavailableError,
     describe_llm_failure,
+    failure_text,
     get_llm,
     get_structured_llm,
 )
@@ -158,7 +159,7 @@ async def sense_node(state: AgentState) -> Dict[str, Any]:
 # Node: evaluate
 # --------------------------------------------------------------------------- #
 async def evaluate_node(state: AgentState) -> Dict[str, Any]:
-    """Compute the adherence snapshot. Pure arithmetic — no LLM."""
+    """Compute the adherence snapshot. Pure arithmetic. No LLM."""
     if state.get("error"):
         return {}
 
@@ -205,7 +206,7 @@ def _choose_action(state, snapshot, plan, targets) -> tuple[AgentDecision, str]:
     if plan is None:
         return (
             AgentDecision.CREATE_INITIAL,
-            "No active plan yet — building your first week.",
+            "No active plan yet. Building your first week.",
         )
 
     # 2. Explicit user request.
@@ -247,7 +248,7 @@ def _choose_action(state, snapshot, plan, targets) -> tuple[AgentDecision, str]:
     if days_elapsed >= plan.duration_days:
         return (
             AgentDecision.STRUCTURAL_REPLAN,
-            f"Your {plan.duration_days}-day plan is complete — here's the next block.",
+            f"Your {plan.duration_days}-day plan is complete. Here's the next block.",
         )
 
     # 5. Today went sideways, but there's still road left.
@@ -276,7 +277,7 @@ def _choose_action(state, snapshot, plan, targets) -> tuple[AgentDecision, str]:
     # 6. Nothing to do.
     return (
         AgentDecision.NO_ACTION,
-        "You're on track — keeping your current plan as it is.",
+        "You're on track. Keeping your current plan as it is.",
     )
 
 
@@ -292,7 +293,7 @@ async def start_generation_node(state: AgentState) -> Dict[str, Any]:
     """Fan-out point for the specialists.
 
     Exists so a conditional edge has one node to target while two plain edges
-    spread the work — LangGraph then runs both specialists in the same
+    spread the work. LangGraph then runs both specialists in the same
     superstep, drafting food and training concurrently rather than in sequence.
     """
     if state.get("error"):
@@ -302,7 +303,7 @@ async def start_generation_node(state: AgentState) -> Dict[str, Any]:
 
 # Days per request. Seven days of four meals is 28 nested objects, and models
 # lose count over that distance: the observed failures were a two-day week, a
-# day with three meals, and an egg in a vegetarian plan — all consistency
+# day with three meals, and an egg in a vegetarian plan. All consistency
 # errors across a long output rather than errors of judgement.
 #
 # The codebase already argues that small structured outputs are the reliable
@@ -334,8 +335,8 @@ async def _draft_meals_in_chunks(
 ) -> MealPlanDraft:
     """Draft the week in day ranges, concurrently, and stitch the result.
 
-    Concurrent rather than sequential because they are independent — the same
-    reason the two specialists fan out — so the week still costs one call's
+    Concurrent rather than sequential because they are independent. The same
+    reason the two specialists fan out, so the week still costs one call's
     latency rather than two.
 
     The title and reasoning come from the first chunk. Asking each chunk for
@@ -408,7 +409,7 @@ async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
         # Restate the non-negotiables *after* the feedback. Models weight the
         # end of a prompt heavily, and the observed failure was exactly this:
         # the reviewer asked for more variety, and the next draft answered with
-        # eggs in a vegetarian plan. The constraints were in the prompt — they
+        # eggs in a vegetarian plan. The constraints were in the prompt. They
         # were just no longer the last thing read.
         prompt += "\n\n---\n\n" + build_non_negotiables(profile)
 
@@ -424,7 +425,7 @@ async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
                 step(
                     "plan_meals",
                     "done",
-                    f'Drafted "{draft.plan_title}" — {len(draft.days)} days of meals.',
+                    f'Drafted "{draft.plan_title}". {len(draft.days)} days of meals.',
                     duration_ms=int((time.perf_counter() - started) * 1000),
                 ),
             ],
@@ -442,9 +443,9 @@ async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
             # Setting `error` routes straight to `record`, so the user gets the
             # reason now instead of after three attempts at the same wall.
             return {
-                "error": failure.message,
+                "error": failure_text(failure),
                 "meal_draft": None,
-                "steps": [step("plan_meals", "error", failure.message)],
+                "steps": [step("plan_meals", "error", failure_text(failure))],
             }
 
         return {
@@ -454,7 +455,11 @@ async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
                 "schema. Return valid structured output matching it exactly."
             ),
             "steps": [
-                step("plan_meals", "error", f"Meal drafting failed. {failure.message}")
+                step(
+                    "plan_meals",
+                    "error",
+                    f"Meal drafting failed. {failure_text(failure)}",
+                )
             ],
         }
 
@@ -463,14 +468,14 @@ async def plan_training_node(state: AgentState) -> Dict[str, Any]:
     """The trainer: the movement half of the week.
 
     Runs without sight of the meal plan. The critic reconciles the two
-    afterwards — serialising them to share context would double the latency to
+    afterwards. Serialising them to share context would double the latency to
     remove a class of conflict the critic already catches.
     """
     if state.get("error"):
         return {}
 
-    # Training rarely causes a validation failure — the validator only inspects
-    # food — so a retry reuses the existing draft rather than paying for it again.
+    # Training rarely causes a validation failure. The validator only inspects
+    # food, so a retry reuses the existing draft rather than paying for it again.
     if state.get("training_draft") is not None and not state.get("critique_feedback"):
         return {}
 
@@ -519,9 +524,9 @@ async def plan_training_node(state: AgentState) -> Dict[str, Any]:
 
         if not failure.retryable:
             return {
-                "error": failure.message,
+                "error": failure_text(failure),
                 "training_draft": None,
-                "steps": [step("plan_training", "error", failure.message)],
+                "steps": [step("plan_training", "error", failure_text(failure))],
             }
 
         return {
@@ -530,7 +535,7 @@ async def plan_training_node(state: AgentState) -> Dict[str, Any]:
                 step(
                     "plan_training",
                     "error",
-                    f"Training drafting failed. {failure.message}",
+                    f"Training drafting failed. {failure_text(failure)}",
                 )
             ],
         }
@@ -540,7 +545,7 @@ def _fill_in_form_cues(activity: ActivityItem) -> None:
     """Fill any missing form cue from the exercise table.
 
     The cue is the reason a beginner can act on the session at all, and the
-    table's is more reliable than a generated one — it is written once and
+    table's is more reliable than a generated one. It is written once and
     reviewed, rather than improvised per request. The model is told it may
     leave `cue` empty; this is what makes that instruction safe.
     """
@@ -571,7 +576,7 @@ async def assemble_node(state: AgentState) -> Dict[str, Any]:
         activity_type="Rest",
         duration_minutes=0,
         intensity="low",
-        description="Recovery day — the trainer didn't cover this one.",
+        description="Recovery day. The trainer didn't cover this one.",
         target_steps=6000,
     )
 
@@ -607,7 +612,7 @@ async def assemble_node(state: AgentState) -> Dict[str, Any]:
     uncovered = [d.day for d in meals.days if d.day not in by_day]
     message = f"Combined {len(daily_plans)} days of meals and training."
     if uncovered:
-        message += f" Days {uncovered} had no session — set to rest."
+        message += f" Days {uncovered} had no session, set to rest."
 
     return {
         "generated_plan": plan,
@@ -619,7 +624,7 @@ async def assemble_node(state: AgentState) -> Dict[str, Any]:
 async def critique_node(state: AgentState) -> Dict[str, Any]:
     """Review the assembled week for problems only visible once combined.
 
-    Advisory. `validate` runs afterwards and has the final say — a model that
+    Advisory. `validate` runs afterwards and has the final say. A model that
     approves an unsafe plan must not be able to make it safe.
     """
     if state.get("error") or state.get("generated_plan") is None:
@@ -652,7 +657,7 @@ async def critique_node(state: AgentState) -> Dict[str, Any]:
                 step(
                     "critique",
                     "done",
-                    "Review unavailable — continuing to the safety checks.",
+                    "Review unavailable. Continuing to the safety checks.",
                 )
             ],
         }
@@ -708,7 +713,7 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
         if result.warnings:
             # Say what the note is, not how many there are. A count is a
             # notification that something happened; the text is the thing the
-            # user might act on — "this plan rotates sooner than asked" being
+            # user might act on. "this plan rotates sooner than asked" being
             # the case that matters.
             first = result.warnings[0]
             rest = len(result.warnings) - 1
@@ -722,7 +727,7 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
             ],
         }
 
-    # Show several. One error plus "(+2 more)" is unactionable — the hidden
+    # Show several. One error plus "(+2 more)" is unactionable. The hidden
     # ones are often the reason the visible one happened.
     shown = result.errors[:MAX_ERRORS_SHOWN]
     hidden = len(result.errors) - len(shown)
@@ -847,7 +852,7 @@ def route_after_critique(state: AgentState) -> str:
     """Send the plan back for revision, or on to the safety checks.
 
     Only the nutritionist is re-run unless the critic's findings concern the
-    training too — regenerating both halves for a note about meal timing wastes
+    training too. Regenerating both halves for a note about meal timing wastes
     a call and risks churning a training week that was fine.
     """
     if state.get("error"):
@@ -862,7 +867,7 @@ def route_after_validate(state: AgentState) -> str:
 
     The retry edge re-enters at `start_generation`, which bumps the attempt
     counter and fans out again. `plan_training` short-circuits on a retry, so in
-    practice only the meals are redrawn — the validator inspects food, so food is
+    practice only the meals are redrawn. The validator inspects food, so food is
     what a rejection is about.
     """
     if state.get("error"):
@@ -1010,7 +1015,7 @@ async def stream_agent(
 
 
 # --------------------------------------------------------------------------- #
-# Recipe expansion (outside the graph — enrichment, not a planning decision)
+# Recipe expansion (outside the graph. Enrichment, not a planning decision)
 # --------------------------------------------------------------------------- #
 # How far a recipe's summed weights may miss the meal's claimed macros.
 # Generous, because the ingredient table is approximate and portion sizes are
@@ -1034,7 +1039,7 @@ async def generate_recipe(
     """Expand one planned meal into a full recipe, verified against its macros.
 
     The plan asserts a meal is 560 kcal and 48g protein. This sums what the
-    recipe actually contains and checks the two agree — turning a claim into
+    recipe actually contains and checks the two agree, turning a claim into
     something computed. One correction attempt, then the recipe is returned
     regardless: a slightly-off recipe the user can cook beats an error page,
     and the analysis travels with it so the UI can be honest about the gap.
@@ -1055,7 +1060,7 @@ async def generate_recipe(
         if not analysis.is_reliable:
             # Too little of the dish is in our table to judge it fairly.
             logger.info(
-                "Recipe for '%s' covers only %.0f%% known ingredients — "
+                "Recipe for '%s' covers only %.0f%% known ingredients. "
                 "skipping the macro check.",
                 meal_name,
                 analysis.coverage * 100,
@@ -1067,7 +1072,7 @@ async def generate_recipe(
 
         logger.info(
             "Recipe for '%s' computes to %.0f kcal / %.0fg protein against a "
-            "claim of %d / %d — requesting a correction (attempt %d).",
+            "claim of %d / %d. Requesting a correction (attempt %d).",
             meal_name,
             analysis.kcal,
             analysis.protein_g,
@@ -1097,7 +1102,7 @@ async def _draft_recipe(
     cauliflower rice and a cucumber salad" is three dishes and twice the JSON.
     A single fixed reservation is therefore right for one of them and wrong for
     the other, and the one it is wrong for came back as a bare
-    `BadRequestError` with no second attempt — the plan path had learned to
+    `BadRequestError` with no second attempt. The plan path had learned to
     retry these and this path had not.
     """
     last: Exception | None = None
@@ -1116,7 +1121,7 @@ async def _draft_recipe(
 
             last = exc
             logger.info(
-                "Recipe draft for '%s' failed on attempt %s (%s) — retrying "
+                "Recipe draft for '%s' failed on attempt %s (%s). Retrying "
                 "with a larger budget.",
                 meal_name,
                 attempt,

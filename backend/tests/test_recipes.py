@@ -98,7 +98,7 @@ class TestRecipeAnalysis:
         )
         analysis = analyse_recipe(recipe.ingredients)
 
-        # The pinch contributes nothing and doesn't dent coverage either — it
+        # The pinch contributes nothing and doesn't dent coverage either. It
         # was never weighed, so it isn't part of the denominator.
         assert analysis.kcal == pytest.approx(296, abs=1)
         assert analysis.coverage == 1.0
@@ -260,7 +260,7 @@ class TestARecipeThatWillNotFitOnTheFirstTry:
     short for the other, and the short case truncated, came back as a 400, and
     was surfaced to the user as the name of an exception class.
 
-    The plan path had already learned both halves of this — retry a truncated
+    The plan path had already learned both halves of this. Retry a truncated
     structured output, and say what went wrong. The recipe path had neither.
     """
 
@@ -358,7 +358,7 @@ class TestARecipeThatWillNotFitOnTheFirstTry:
 class TestTheRecipeErrorSaysSomething:
     def test_the_exception_class_name_is_not_the_message(self):
         """What the user actually saw was "Could not generate the recipe:
-        BadRequestError" — a class name, naming none of the dozen things a 400
+        BadRequestError". A class name, naming none of the dozen things a 400
         can mean and suggesting nothing to do about any of them."""
         from app.agent.llm import describe_llm_failure
 

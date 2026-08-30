@@ -24,21 +24,21 @@ from app.services.ingredients import protein_reference_block
 
 _DIET_RULES: dict[DietType, str] = {
     DietType.VEGETARIAN: (
-        "STRICTLY VEGETARIAN. No meat, poultry, fish, seafood, or eggs — including "
+        "STRICTLY VEGETARIAN. No meat, poultry, fish, seafood, or eggs. Including "
         "hidden egg in mayonnaise, cakes, and some breads. Dairy IS allowed: paneer, "
         "curd, milk, ghee, and cheese are your primary protein anchors, alongside "
         "dal, rajma, chana, soya chunks, and tofu."
     ),
     DietType.EGGETARIAN: (
         "EGGETARIAN. Eggs and dairy ARE allowed. No meat, poultry, fish, or seafood. "
-        "Eggs are the most efficient protein source available here — use them "
+        "Eggs are the most efficient protein source available here. Use them "
         "generously at breakfast."
     ),
     DietType.VEGAN: (
         "STRICTLY VEGAN. No animal products of any kind: no meat, fish, eggs, dairy, "
         "honey, ghee, paneer, curd, or butter. Protein must come from tofu, tempeh, "
         "soya chunks, seitan, legumes, lentils, nuts, seeds, and fortified plant "
-        "milks. Hitting the protein target here needs deliberate planning — check "
+        "milks. Hitting the protein target here needs deliberate planning. Check "
         "every meal carries its share."
     ),
     DietType.JAIN: (
@@ -49,8 +49,8 @@ _DIET_RULES: dict[DietType, str] = {
         "dairy, paneer, and permitted legumes."
     ),
     DietType.NON_VEGETARIAN: (
-        "NON-VEGETARIAN. All foods are permitted. Favour lean protein — chicken "
-        "breast, fish, eggs, lean mutton — and still include vegetarian meals for "
+        "NON-VEGETARIAN. All foods are permitted. Favour lean protein. Chicken "
+        "breast, fish, eggs, lean mutton, and still include vegetarian meals for "
         "variety, cost, and fibre."
     ),
     DietType.HALAL: (
@@ -62,27 +62,27 @@ _DIET_RULES: dict[DietType, str] = {
 
 _CUISINE_GUIDANCE: dict[Cuisine, str] = {
     Cuisine.NORTH_INDIAN: (
-        "North Indian home cooking — roti, sabzi, dal, rajma, chole, paneer dishes, "
+        "North Indian home cooking. Roti, sabzi, dal, rajma, chole, paneer dishes, "
         "curd, parathas. Use everyday Indian kitchen ingredients."
     ),
     Cuisine.SOUTH_INDIAN: (
-        "South Indian home cooking — idli, dosa, sambar, rasam, upma, poha, curd "
+        "South Indian home cooking. Idli, dosa, sambar, rasam, upma, poha, curd "
         "rice, coconut chutney, avial. Use everyday South Indian ingredients."
     ),
     Cuisine.CONTINENTAL: (
-        "Continental / Western — salads, grain bowls, grilled proteins, pasta, "
+        "Continental / Western. Salads, grain bowls, grilled proteins, pasta, "
         "sandwiches, roasted vegetables."
     ),
     Cuisine.EAST_ASIAN: (
-        "East Asian — stir-fries, steamed dishes, noodle and rice bowls, tofu, "
+        "East Asian. Stir-fries, steamed dishes, noodle and rice bowls, tofu, "
         "miso, kimchi, light broths."
     ),
     Cuisine.MEDITERRANEAN: (
-        "Mediterranean — olive oil, legumes, whole grains, grilled fish and "
+        "Mediterranean. Olive oil, legumes, whole grains, grilled fish and "
         "vegetables, yoghurt, hummus, salads."
     ),
     Cuisine.MIXED: (
-        "Mixed cuisine — vary across Indian and international dishes through the "
+        "Mixed cuisine. Vary across Indian and international dishes through the "
         "week. Keep ingredients accessible."
     ),
 }
@@ -117,7 +117,7 @@ def _describe_cuisines(preferences) -> str:
     """Render one or more cuisine choices as a single instruction.
 
     Selecting several means "draw from all of these across the week", not
-    "fuse them into one dish" — a model handed a bare list will cheerfully
+    "fuse them into one dish". A model handed a bare list will cheerfully
     invent a miso rajma, so the multi-cuisine phrasing says so explicitly.
 
     Values arrive as plain strings from Mongo (`use_enum_values=True`) and as
@@ -132,7 +132,7 @@ def _describe_cuisines(preferences) -> str:
     details = " ".join(_CUISINE_GUIDANCE[c] for c in cuisines)
     return (
         f"The user eats across several cuisines ({names}). Draw from all of "
-        f"them over the week — whole dishes from one tradition at a time, "
+        f"them over the week. Whole dishes from one tradition at a time, "
         f"never blended into a single dish. {details}"
     )
 
@@ -143,9 +143,9 @@ def build_constraints_block(profile: ProfileInDB) -> str:
     goal = Goal(profile.goal)
 
     lines = [
-        "## HARD CONSTRAINTS — violating any of these makes the plan unusable",
+        "## HARD CONSTRAINTS. Violating any of these makes the plan unusable",
         "",
-        f"**Diet type — {diet.label}:** {_DIET_RULES[diet]}",
+        f"**Diet type. {diet.label}:** {_DIET_RULES[diet]}",
         "",
         f"**Cuisine:** {_describe_cuisines(profile.cuisine_preferences)}",
         "",
@@ -155,18 +155,18 @@ def build_constraints_block(profile: ProfileInDB) -> str:
 
     if profile.allergies:
         lines.append(
-            f"**ALLERGIES — must not appear anywhere:** {', '.join(profile.allergies)}"
+            f"**ALLERGIES. Must not appear anywhere:** {', '.join(profile.allergies)}"
         )
     if profile.disliked_foods:
-        lines.append(f"**Dislikes — avoid:** {', '.join(profile.disliked_foods)}")
+        lines.append(f"**Dislikes. Avoid:** {', '.join(profile.disliked_foods)}")
 
     lines.extend(
         [
             f"**Meals per day:** exactly {profile.meals_per_day}",
-            f"**Cooking skill:** {profile.cooking_skill} — keep techniques within reach",
+            f"**Cooking skill:** {profile.cooking_skill}. Keep techniques within reach",
             f"**Max prep time:** {profile.max_prep_minutes} minutes per meal",
             f"**Budget:** {profile.budget_tier}",
-            f"**Eats out ~{profile.eat_out_per_week}x/week** — leave room for that",
+            f"**Eats out ~{profile.eat_out_per_week}x/week**. Leave room for that",
         ]
     )
 
@@ -174,7 +174,7 @@ def build_constraints_block(profile: ProfileInDB) -> str:
         lines.append(f"**Medical notes:** {profile.medical_notes}")
 
     # Ground the model in real foods with real numbers. Protein is the hardest
-    # target to hit — especially on vegetarian and vegan diets — and without a
+    # target to hit. Especially on vegetarian and vegan diets, and without a
     # reference the model tends to assert a figure rather than build a meal that
     # reaches it.
     reference = protein_reference_block(diet)
@@ -189,7 +189,7 @@ def build_targets_block(targets: NutritionTargets, meals_per_day: int) -> str:
     per_meal_kcal = round(targets.calories_kcal / meals_per_day)
     per_meal_protein = round(targets.protein_g / meals_per_day)
 
-    return f"""## DAILY TARGETS — computed, not negotiable
+    return f"""## DAILY TARGETS. Computed, not negotiable
 
 - Calories: **{targets.calories_kcal} kcal/day**
 - Protein: **{targets.protein_g}g/day**
@@ -219,9 +219,9 @@ def _meal_slots(meals_per_day: int) -> str:
 
 
 def _build_evidence_block(snapshot: AdherenceSnapshot) -> str:
-    """Render observed adherence — the reason a replan is happening."""
+    """Render observed adherence. The reason a replan is happening."""
     lines = [
-        "## OBSERVED BEHAVIOUR — this is why you are being asked to act",
+        "## OBSERVED BEHAVIOUR. This is why you are being asked to act",
         "",
         f"- Today: {snapshot.meals_eaten} eaten, {snapshot.meals_skipped} skipped, "
         f"{snapshot.meals_pending} still pending out of {snapshot.meals_planned} planned",
@@ -234,7 +234,7 @@ def _build_evidence_block(snapshot: AdherenceSnapshot) -> str:
     ]
     if snapshot.skip_streak_days > 1:
         lines.append(
-            f"- **{snapshot.skip_streak_days} consecutive days with skipped meals** — "
+            f"- **{snapshot.skip_streak_days} consecutive days with skipped meals**. "
             "this is a pattern, not a one-off. The plan is probably the problem."
         )
     if snapshot.steps is not None:
@@ -252,7 +252,7 @@ def _build_task_block(
     trigger_detail: str,
     duration_days: int,
 ) -> str:
-    """The mode-specific instruction — what kind of plan to produce and why."""
+    """The mode-specific instruction. What kind of plan to produce and why."""
     slots = _meal_slots(profile.meals_per_day)
     common = f"""
 ## OUTPUT REQUIREMENTS
@@ -261,7 +261,7 @@ def _build_task_block(
 - Each day has exactly **{profile.meals_per_day} meals** in this order: {slots}.
 - `meal_id` must follow the pattern `d{{day}}-{{meal_type}}`, e.g. `d1-breakfast`. \
 For a repeated slot, suffix an index: `d1-snack-2`.
-- Do NOT include recipe steps — only the dish name, a one-sentence description, \
+- Do NOT include recipe steps. Only the dish name, a one-sentence description, \
 and macros. Full recipes are generated separately, on demand.
 - `agent_reasoning` must be 2-3 sentences explaining this specific plan for this \
 specific person. Reference their diet type and, where relevant, what you observed \
@@ -269,7 +269,7 @@ in their behaviour. No generic filler.
 """
 
     if decision == AgentDecision.CREATE_INITIAL:
-        task = """## TASK — Create the first plan
+        task = """## TASK. Create the first plan
 
 This user has just completed onboarding. Build their opening week.
 
@@ -278,7 +278,7 @@ habit, not to be the perfect diet. Favour simple, repeatable meals and start
 activity at a level they will definitely complete."""
 
     elif decision == AgentDecision.REBALANCE_DAY:
-        task = f"""## TASK — Rebalance around a missed meal
+        task = f"""## TASK. Rebalance around a missed meal
 
 Trigger: {trigger_detail}
 
@@ -287,7 +287,7 @@ the **remaining** meals absorb the difference.
 
 - If they SKIPPED and are under target, redistribute the missing calories and
   protein into the meals still ahead of them. Do not try to claw back the entire
-  deficit in one sitting — cap any single meal at roughly 40% of the daily target.
+  deficit in one sitting. Cap any single meal at roughly 40% of the daily target.
 - If they OVERSHOT, lighten the remaining meals, but never below a sensible
   minimum. Do not prescribe going hungry to punish a slip.
 - Keep meals they have already eaten exactly as they were. Regenerate the full
@@ -297,7 +297,7 @@ the **remaining** meals absorb the difference.
   user. Be matter-of-fact, not disappointed."""
 
     else:  # STRUCTURAL_REPLAN
-        task = f"""## TASK — Structural replan
+        task = f"""## TASK. Structural replan
 
 Trigger: {trigger_detail}
 
@@ -309,7 +309,7 @@ Change the structure:
 - If breakfasts are consistently skipped, stop planning breakfast. Move to fewer,
   larger meals, or make breakfast something requiring zero preparation.
 - If prep-heavy meals are being skipped, drop to assembly-only food.
-- If evening meals fail, they may be eating out — plan for restaurant-realistic
+- If evening meals fail, they may be eating out. Plan for restaurant-realistic
   choices instead of pretending they'll cook.
 - Reduce activity volume if sessions are being missed. A workout they complete
   beats one they skip.
@@ -340,13 +340,13 @@ steps a nervous beginner can follow. Never assume specialist equipment.
 ## Quantities
 
 Every substantial ingredient MUST carry `quantity_g`, its weight in grams
-(use millilitres for liquids — treat 1 ml as 1 g). This is not a formatting
+(use millilitres for liquids. Treat 1 ml as 1 g). This is not a formatting
 preference: the weights are summed against a nutrition table to check the
 recipe actually delivers the macros it claims, so a missing weight means the
 check silently skips that ingredient.
 
-- `item` is the food alone — "paneer", not "150g paneer, crumbled".
-- Put preparation in `preparation` — "crumbled", "finely chopped".
+- `item` is the food alone. "paneer", not "150g paneer, crumbled".
+- Put preparation in `preparation`. "crumbled", "finely chopped".
 - Leave `quantity_g` null ONLY for seasonings genuinely too small to weigh:
   a pinch of asafoetida, a couple of curry leaves. Never for a vegetable, a
   grain, a protein source, or any fat you cook in.
@@ -385,8 +385,8 @@ Constraints:
 Give every ingredient a weight in grams, numbered steps of one sentence each,
 honest prep time, and one useful swap or make-ahead tip.
 
-The weights must actually add up to roughly the calories and protein above —
-they are checked against a nutrition table, not taken on trust."""
+The weights must actually add up to roughly the calories and protein above.
+They are checked against a nutrition table, not taken on trust."""
 
 
 def build_recipe_correction(
@@ -410,7 +410,7 @@ protein**.
 
 Rewrite the recipe with portion sizes that genuinely reach those figures. If the
 protein is short, increase the protein-dense ingredient rather than scaling
-everything up — that would overshoot the calories. Keep every quantity in grams."""
+everything up, that would overshoot the calories. Keep every quantity in grams."""
 
 
 # --------------------------------------------------------------------------- #
@@ -418,12 +418,12 @@ everything up — that would overshoot the calories. Keep every quantity in gram
 #
 # One generalist prompt had to carry diet rules, macro targets, training
 # programming and tone all at once. Splitting it lets each specialist see only
-# what it needs, which keeps each prompt short and each output small — and small
+# what it needs, which keeps each prompt short and each output small, and small
 # structured outputs are the reliable ones.
 # --------------------------------------------------------------------------- #
 
 NUTRITIONIST_SYSTEM_PROMPT = """You are Kaya's nutritionist. You plan food, and \
-only food — another specialist handles training, so never mention exercise.
+only food. Another specialist handles training, so never mention exercise.
 
 ## Non-negotiable rules
 
@@ -431,7 +431,7 @@ only food — another specialist handles training, so never mention exercise.
 computed from validated equations with safety limits applied. Treat them as fixed.
 2. NEVER suggest a food the user's diet type forbids. A plan the user cannot eat \
 is worthless.
-3. NEVER include an allergen the user has listed — not as a main ingredient, not \
+3. NEVER include an allergen the user has listed, not as a main ingredient, not \
 as a garnish, not as an optional extra.
 4. Meals must be REALISTIC for the user's cooking skill, prep time and budget.
 5. Every meal's macros must be plausible for the portion described. Do not claim \
@@ -452,7 +452,7 @@ Warm, direct, specific. Never lecture about willpower."""
 
 
 TRAINER_SYSTEM_PROMPT = """You are Kaya's strength and conditioning coach. You \
-plan training, and only training — another specialist handles food, so never \
+plan training, and only training. Another specialist handles food, so never \
 prescribe meals, calories or macros.
 
 ## Programming rules
@@ -466,7 +466,7 @@ day after a long run, and two high-intensity days should not be consecutive.
 4. **Start where the user actually is.** A sedentary beginner gets walking and \
 bodyweight work, not a five-day split. A session they complete beats one they \
 skip.
-5. **Progress within the week** — build intensity or volume across the block, \
+5. **Progress within the week**. Build intensity or volume across the block, \
 then taper into the rest day.
 6. **Respect the signals.** Low step counts or poor sleep mean less volume, not \
 more discipline.
@@ -476,13 +476,13 @@ so plainly and set duration to 0."""
 
 
 CRITIC_SYSTEM_PROMPT = """You are Kaya's reviewer. Two specialists have each \
-planned their half of a week — one the food, one the training — without seeing \
+planned their half of a week. One the food, one the training, without seeing \
 the other's work. Your job is to catch what neither could.
 
 You are looking for problems that only appear when the halves are put together, \
 or that span the whole week:
 
-- Training and food pulling in opposite directions — a heavy session on the \
+- Training and food pulling in opposite directions. A heavy session on the \
 lowest-calorie day, or leg work the morning after a long run.
 - No genuine rest day, or two hard days back to back.
 - Elaborate cooking stacked on days the user is also training hardest.
@@ -492,7 +492,7 @@ lowest-calorie day, or leg work the morning after a long run.
 ## How to judge
 
 Approve unless something is genuinely wrong. A plan that is merely not what you \
-would have written is fine — churn costs the user a slower response and gains \
+would have written is fine. Churn costs the user a slower response and gains \
 them nothing.
 
 Do NOT re-check arithmetic. Calorie totals, macro reconciliation, diet \
@@ -501,7 +501,7 @@ mistakes. Flagging them here wastes a revision round.
 
 When you reject, every issue must be specific and actionable: name the day and \
 what to change. "Day 4 pairs the week's heaviest squat session with its lowest \
-calorie day — move the session to day 5" is useful. "Could be better balanced" \
+calorie day. Move the session to day 5" is useful. "Could be better balanced" \
 is not."""
 
 
@@ -569,7 +569,7 @@ def build_exercise_block(profile: ProfileInDB) -> str:
     chosen = ", ".join(s.label for s in styles) or "bodyweight"
 
     lines = [
-        "## EXERCISE LIST — choose only from these, by exact name",
+        "## EXERCISE LIST. Choose only from these, by exact name",
         "",
         f"The user trains this way: **{chosen}**. Selected for a {level.value} "
         "trainee. Anything not on this list is unavailable, however well it "
@@ -616,7 +616,7 @@ def build_trainer_prompt(
 
     if profile.medical_notes:
         sections.extend(
-            [f"**Medical notes — programme around these:** {profile.medical_notes}", ""]
+            [f"**Medical notes. Programme around these:** {profile.medical_notes}", ""]
         )
 
     if snapshot is not None:
@@ -637,15 +637,15 @@ def build_trainer_prompt(
         f"""## OUTPUT REQUIREMENTS
 
 - Exactly **{duration_days} days**, numbered 1 to {duration_days}.
-- One activity per day. Rest days are activities too — name them plainly, set
+- One activity per day. Rest days are activities too. Name them plainly, set
   `duration_minutes` to 0 and leave `exercises` empty.
 - **Every non-rest day must list its exercises**, each with sets, reps and rest.
   "Upper body training" on its own is not a plan anyone can follow.
 - Use exact names from the exercise list. Do not invent or rename movements.
 - 3 or 4 exercises for a strength session; 1 to 2 for a cardio or mobility
-  day. Keep it tight — a long list is where output goes wrong.
+  day. Keep it tight. A long list is where output goes wrong.
 - A strength session of three or more movements must train more than one
-  pattern — do not build a session entirely out of pushes.
+  pattern. Do not build a session entirely out of pushes.
 - Keep one or two easy mobility days in the week even when the user picked a
   single style, and say so in the day's description. A week of nothing but
   hard sessions is how people get hurt and stop. Naming the exception is the
@@ -678,13 +678,13 @@ def build_critic_prompt(
     if snapshot is not None:
         lines.extend([_build_evidence_block(snapshot), ""])
 
-    lines.extend([f"## THE PLAN — {plan.plan_title}", ""])
+    lines.extend([f"## THE PLAN. {plan.plan_title}", ""])
 
     for day in plan.daily_plans:
         total_kcal = sum(m.calories_kcal for m in day.meals)
         meals = "; ".join(f"{m.meal_type.value}: {m.name}" for m in day.meals)
         lines.append(
-            f"**Day {day.day}** ({total_kcal} kcal) — "
+            f"**Day {day.day}** ({total_kcal} kcal). "
             f"{day.activity.activity_type}, {day.activity.duration_minutes} min "
             f"({day.activity.intensity}). {meals}"
         )
@@ -744,7 +744,7 @@ def build_non_negotiables(profile: ProfileInDB) -> str:
     lines = [
         "## THESE OVERRIDE EVERYTHING ABOVE",
         "",
-        f"1. **Diet — {diet.label}.** {_DIET_RULES[diet]} No feedback, however "
+        f"1. **Diet. {diet.label}.** {_DIET_RULES[diet]} No feedback, however "
         "reasonable, justifies breaking this.",
         f"2. **Exactly {profile.meals_per_day} meals on every single day.** "
         "Count them before you answer.",
@@ -754,7 +754,7 @@ def build_non_negotiables(profile: ProfileInDB) -> str:
 
     if profile.allergies:
         lines.append(
-            f"4. **Allergies — must not appear anywhere:** "
+            f"4. **Allergies. Must not appear anywhere:** "
             f"{', '.join(profile.allergies)}"
         )
 

@@ -3,7 +3,7 @@
 This file exists because it did not. `max_tokens` was sized per *day* while
 the schema is written per *meal*, so a four-meals-a-day profile asked for
 1631 tokens of JSON against a 1900-token reservation that also had to cover
-the model's reasoning — and every attempt truncated in the same place, three
+the model's reasoning, and every attempt truncated in the same place, three
 times a run, forever.
 
 The numbers in `llm.py` are therefore measured, not guessed: these tests build
@@ -87,7 +87,7 @@ def _wire_repositories(monkeypatch, *, meals_per_day: int):
     monkeypatch.setattr(graph, "ProfileRepository", Profiles)
     monkeypatch.setattr(graph, "AgentEventRepository", Events)
 
-# JSON is denser than prose — punctuation, digits and short keys tokenise close
+# JSON is denser than prose. Punctuation, digits and short keys tokenise close
 # to one token per three characters. Deliberately pessimistic: under-counting
 # here would reintroduce the bug this file is about.
 CHARS_PER_TOKEN = 3
@@ -153,7 +153,7 @@ def a_training_plan(days: int) -> str:
                 {
                     "day": n + 1,
                     "activity": {
-                        "activity_type": "Strength training — full body",
+                        "activity_type": "Strength training. Full body",
                         "duration_minutes": 45,
                         "intensity": "moderate",
                         "description": (
@@ -181,7 +181,7 @@ class TestTheReservationFitsTheAnswer:
         """The regression. Five meals a day needed 1996 tokens and got 1900.
 
         `meals_per_day` is a profile setting the user picks during onboarding,
-        so this was not an edge case — it was a subset of users for whom the
+        so this was not an edge case. It was a subset of users for whom the
         agent could never succeed.
         """
         from app.agent import graph
@@ -191,7 +191,7 @@ class TestTheReservationFitsTheAnswer:
 
         assert reserved >= needed + REASONING_HEADROOM, (
             f"{meals_per_day} meals/day needs ~{needed} tokens of JSON plus "
-            f"room to think, but only {reserved} are reserved — the model will "
+            f"room to think, but only {reserved} are reserved. The model will "
             "be cut off mid-plan"
         )
 
@@ -225,7 +225,7 @@ class TestARetryIsADifferentRequest:
         budgets = [budget_for(MealPlanDraft, attempt=n) for n in (1, 2, 3)]
 
         assert budgets[0] < budgets[1] < budgets[2], (
-            f"attempts reserved {budgets} — a retry that sends the identical "
+            f"attempts reserved {budgets}. A retry that sends the identical "
             "request is not a retry"
         )
 
@@ -273,7 +273,7 @@ class TestTheProfileActuallyReachesTheBudget:
     """Arithmetic that is never called is still a bug.
 
     `budget_for` can be perfectly correct and the plan still truncate, if the
-    graph never passes it the profile's meal count — every call would quietly
+    graph never passes it the profile's meal count. Every call would quietly
     use the default of four and a six-meal user would fail exactly as before.
     Nothing above this class would notice. So this drives the real graph and
     reads the reservation off the call.
@@ -313,7 +313,7 @@ class TestTheProfileActuallyReachesTheBudget:
         assert reservations["MealPlanDraft"][0] == budget_for(
             MealPlanDraft, meals_per_day=meals_per_day
         ), (
-            "the reservation does not match the profile — the meal count is "
+            "the reservation does not match the profile. The meal count is "
             "not reaching budget_for, so every profile gets the default"
         )
 
@@ -336,8 +336,8 @@ class TestTheProfileActuallyReachesTheBudget:
 class TestACeilingBelowWhatAPlanNeeds:
     """`LLM_MAX_TOKENS` is the one setting that can defeat all of the above.
 
-    It is a hard ceiling, so a number set too low — as the old 413 message and
-    the old `.env.example` both suggested — silently reintroduces the exact
+    It is a hard ceiling, so a number set too low, as the old 413 message and
+    the old `.env.example` both suggested. Silently reintroduces the exact
     truncation this file exists to prevent. Since that is now foreseeable, it
     is said at startup rather than discovered.
     """

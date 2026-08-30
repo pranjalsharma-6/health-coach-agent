@@ -1,4 +1,4 @@
-"""Agent state — the data that flows through the LangGraph workflow."""
+"""Agent state. The data that flows through the LangGraph workflow."""
 
 import operator
 from datetime import date
@@ -21,7 +21,7 @@ def keep_first_error(current: Optional[str], incoming: Optional[str]) -> Optiona
     """Reducer for the `error` channel: the first failure reported wins.
 
     `plan_meals` and `plan_training` run in the same superstep, so a condition
-    that breaks both — no API key, a retired model — makes both write here at
+    that breaks both. No API key, or a retired model, makes both write here at
     once. A plain LastValue channel rejects that with LangGraph's
     `InvalidUpdateError`, which replaces the real diagnosis with a framework
     error about concurrent writes.
@@ -37,7 +37,7 @@ def keep_first_error(current: Optional[str], incoming: Optional[str]) -> Optiona
 class AgentState(TypedDict, total=False):
     """State passed between nodes.
 
-    Every node returns a **partial** update — only the keys it actually changed —
+    Every node returns a **partial** update. Only the keys it actually changed,
     rather than the whole dict. That isn't a style preference: the nutritionist
     and the trainer run concurrently, and LangGraph's default channel rejects two
     writes to the same key within one superstep. Two nodes each returning the
@@ -132,7 +132,7 @@ def step(node: str, status: str, message: str, **extra: Any) -> Dict[str, Any]:
     two nodes record progress in the same superstep.
 
     The trace is streamed to the browser, so the user watches the agent reason
-    instead of staring at a spinner — and it's what makes a run auditable
+    instead of staring at a spinner, and it's what makes a run auditable
     afterwards.
     """
     entry: Dict[str, Any] = {"node": node, "status": status, "message": message}

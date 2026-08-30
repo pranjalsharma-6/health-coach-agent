@@ -1,4 +1,4 @@
-"""User account models — authentication only. Health data lives in Profile."""
+"""User account models. Authentication only. Health data lives in Profile."""
 
 from datetime import datetime
 
@@ -30,7 +30,7 @@ class UserLogin(BaseModel):
 
 
 class UserPublic(BaseModel):
-    """Safe user representation — no password hash."""
+    """Safe user representation. No password hash."""
 
     id: PyObjectId
     email: EmailStr

@@ -1,4 +1,4 @@
-"""Health profile — everything captured during onboarding.
+"""Health profile. Everything captured during onboarding.
 
 Every field here is a hard constraint on plan generation, not decoration.
 If a field can't change the output, it shouldn't be in the onboarding flow.
@@ -38,7 +38,7 @@ def _coerce_cuisines(value: Any) -> Any:
     a one-item list rather than migrated.
 
     An empty selection means "no strong preference", which is what MIXED
-    already encodes — mapping it there beats leaving the planner with no
+    already encodes. Mapping it there beats leaving the planner with no
     cuisine guidance at all.
     """
     if value is None:
@@ -56,7 +56,7 @@ CuisineList = Annotated[List[Cuisine], BeforeValidator(_coerce_cuisines)]
 def _coerce_styles(value: Any) -> Any:
     """Same shape as cuisines: a bare value becomes a list, empty means default.
 
-    An empty selection is not an error — it means "no preference" — and
+    An empty selection is not an error. It means "no preference", and
     bodyweight is the honest default because it needs nothing and excludes
     nobody.
     """
@@ -135,7 +135,7 @@ class ProfileCreate(ProfileBase):
 
 
 class ProfileUpdate(BaseModel):
-    """Partial update — every field optional."""
+    """Partial update. Every field optional."""
 
     gender: Optional[Gender] = None
     age_years: Optional[int] = Field(default=None, ge=13, le=100)

@@ -82,7 +82,7 @@ export default function OnboardingPage() {
   /** Add or remove one cuisine, keeping at least one selected.
 
    * Deselecting the last one would leave the planner with no cuisine guidance
-   * at all, so it falls back to "Mixed" — which is what an empty selection
+   * at all, so it falls back to "Mixed", which is what an empty selection
    * means anyway. Choosing anything else then clears Mixed, since "mixed plus
    * South Indian" is not a coherent instruction.
    */
@@ -213,7 +213,7 @@ export default function OnboardingPage() {
           {step === 1 && (
             <StepShell
               title="A bit about you"
-              subtitle="Your calorie and protein targets are calculated from these — nothing here is guessed."
+              subtitle="Your calorie and protein targets are calculated from these. Nothing here is guessed."
             >
               <div className="space-y-5">
                 <Field label="Gender">
@@ -286,7 +286,7 @@ export default function OnboardingPage() {
                     </Field>
                     <Field
                       label="Over how long?"
-                      hint="weeks — Kaya caps the rate if this is too fast"
+                      hint="weeks. Kaya caps the rate if this is too fast"
                       htmlFor="timeline"
                     >
                       <Input
@@ -308,7 +308,7 @@ export default function OnboardingPage() {
 
                 {!stepValid && (
                   <Alert tone="warning">
-                    Please check these values — something&apos;s outside a
+                    Please check these values. Something&apos;s outside a
                     realistic range.
                   </Alert>
                 )}
@@ -319,7 +319,7 @@ export default function OnboardingPage() {
           {step === 2 && (
             <StepShell
               title="How active are you?"
-              subtitle="Be honest rather than aspirational — an inflated answer means an inflated calorie target."
+              subtitle="Be honest rather than aspirational. An inflated answer means an inflated calorie target."
             >
               <div className="space-y-3">
                 {(Object.keys(ACTIVITY_LABELS) as ActivityLevel[]).map(
@@ -338,7 +338,7 @@ export default function OnboardingPage() {
               <div className="mt-7">
                 <Field
                   label="How do you like to train?"
-                  hint="Pick as many as you like. Kaya only prescribes movements you can actually do — nothing here assumes a gym you don't have."
+                  hint="Pick as many as you like. Kaya only prescribes movements you can actually do, and nothing here assumes a gym you don't have."
                 >
                   <div className="grid sm:grid-cols-2 gap-2">
                     {(Object.keys(TRAINING_STYLE_LABELS) as TrainingStyle[]).map(
@@ -381,7 +381,7 @@ export default function OnboardingPage() {
 
                 <Field
                   label="Food you actually cook and enjoy"
-                  hint="Pick as many as you like — Kaya draws from all of them across the week."
+                  hint="Pick as many as you like. Kaya draws from all of them across the week."
                 >
                   <div className="grid sm:grid-cols-3 gap-2">
                     {(Object.keys(CUISINE_LABELS) as Cuisine[]).map((c) => (
@@ -405,7 +405,7 @@ export default function OnboardingPage() {
 
                 <TagInput
                   label="Foods you'd rather avoid"
-                  hint="Not allergies — just things you dislike."
+                  hint="Not allergies, just things you dislike."
                   values={draft.disliked_foods}
                   onChange={(v) => update("disliked_foods", v)}
                   placeholder="mushroom, bitter gourd…"

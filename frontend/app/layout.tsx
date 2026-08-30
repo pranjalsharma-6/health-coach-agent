@@ -11,7 +11,7 @@ const inter = Inter({
   display: "swap",
 });
 
-// A serif for headings — it's a food app, not a spreadsheet.
+// A serif for headings. It's a food app, not a spreadsheet.
 const fraunces = Fraunces({
   subsets: ["latin"],
   variable: "--font-fraunces",
@@ -20,9 +20,9 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Kaya — the nutrition coach that replans when life happens",
+  title: "Kaya, the nutrition coach that replans when life happens",
   description:
-    "An autonomous nutrition coach. Tell it how you eat, log what you actually did, and it rewrites your week when you fall off — no willpower required.",
+    "An autonomous nutrition coach. Tell it how you eat, log what you actually did, and it rewrites your week when you fall off, no willpower required.",
 };
 
 export default function RootLayout({
@@ -33,7 +33,7 @@ export default function RootLayout({
   return (
     // suppressHydrationWarning is required, not cosmetic: the inline script
     // below sets data-theme before React hydrates, and without this React
-    // treats the attribute mismatch as a failed hydration and abandons it —
+    // treats the attribute mismatch as a failed hydration and abandons it,
     // leaving every button and form on the site inert.
     <html
       lang="en"
@@ -43,7 +43,7 @@ export default function RootLayout({
     >
       <head>
         {/* Resolve the theme before first paint. Without this the page renders
-            light, then snaps to dark once React hydrates — the flash is brief
+            light, then snaps to dark once React hydrates. The flash is brief
             and very visible on a dark-mode machine. */}
         <script
           dangerouslySetInnerHTML={{

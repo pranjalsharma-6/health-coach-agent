@@ -49,8 +49,8 @@ CurrentUser = Annotated[UserInDB, Depends(get_current_user)]
 async def get_current_profile(user: CurrentUser) -> ProfileInDB:
     """Resolve the user's health profile, requiring that onboarding is complete.
 
-    Most of the app is meaningless without a profile — there's nothing to plan
-    against — so this fails with a specific 409 the frontend can route on rather
+    Most of the app is meaningless without a profile. There's nothing to plan
+    against, so this fails with a specific 409 the frontend can route on rather
     than a generic error.
     """
     profile = await ProfileRepository.get(str(user.id))

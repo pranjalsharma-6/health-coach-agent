@@ -226,7 +226,7 @@ export function MealCard({ meal, status, onLog, loggable }: Props) {
  * Shows what the ingredient weights actually add up to.
  *
  * The plan asserts a meal's macros; this is the arithmetic on what's in it.
- * Surfacing both — and the gap between them — is the entire point: a number
+ * Surfacing both, and the gap between them, is the entire point: a number
  * the user can check beats a number they have to trust.
  */
 function MacroCheckPanel({ check }: { check: MacroCheck }) {
@@ -236,7 +236,7 @@ function MacroCheckPanel({ check }: { check: MacroCheck }) {
         Kaya recognised {Math.round(check.coverage * 100)}% of these ingredients
         by weight, which isn&apos;t enough to verify the macros
         {check.unmatched.length > 0 && (
-          <> — {check.unmatched.slice(0, 3).join(", ")} aren&apos;t in its table</>
+          <>: {check.unmatched.slice(0, 3).join(", ")} aren&apos;t in its table</>
         )}
         .
       </div>
@@ -293,7 +293,7 @@ function MacroCheckPanel({ check }: { check: MacroCheck }) {
         )}
       >
         {close
-          ? "The weights add up — these portions really do hit the plan."
+          ? "The weights add up. These portions really do hit the plan."
           : "The weights don't quite reach the plan's figures. Trust the computed numbers above over the planned ones."}
       </p>
     </div>

@@ -65,7 +65,7 @@ export default function LandingPage() {
           >
             Other apps tell you that you ate 2,400 calories. They don&apos;t change
             your dinner because you skipped lunch. Kaya notices, works out why it
-            matters for your goal, and rewrites the rest of your week — without
+            matters for your goal, and rewrites the rest of your week, without
             you asking.
           </p>
 
@@ -91,12 +91,12 @@ export default function LandingPage() {
             <FeatureCard
               emoji="🔁"
               title="It adapts on its own"
-              body="Skip lunch and the remaining meals absorb the difference. Skip breakfast three days running and it stops planning breakfast — because the plan is what's wrong, not you."
+              body="Skip lunch and the remaining meals absorb the difference. Skip breakfast three days running and it stops planning breakfast, because the plan is what's wrong, not you."
             />
             <FeatureCard
               emoji="🙏"
               title="It knows how you actually eat"
-              body="Vegetarian, eggetarian, vegan, Jain, halal — modelled properly, not as one checkbox. No quinoa bowls for someone who eats dal-chawal."
+              body="Vegetarian, eggetarian, vegan, Jain and halal, modelled properly rather than as one checkbox. No quinoa bowls for someone who eats dal-chawal."
             />
             <FeatureCard
               emoji="🧮"
@@ -131,7 +131,7 @@ export default function LandingPage() {
 
       <footer className="border-t border-line">
         <div className="max-w-6xl mx-auto px-6 py-8 text-sm text-ink-muted flex flex-col sm:flex-row gap-2 justify-between">
-          <p>Kaya — काया, &ldquo;body&rdquo; in Sanskrit and Hindi.</p>
+          <p>Kaya. काया, &ldquo;body&rdquo; in Sanskrit and Hindi.</p>
           <p>Built with FastAPI, LangGraph and Next.js.</p>
         </div>
       </footer>

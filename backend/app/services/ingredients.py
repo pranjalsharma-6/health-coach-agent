@@ -40,14 +40,14 @@ class Ingredient:
     fat_g: float
     #: Search terms that identify this ingredient in a meal name/description.
     aliases: tuple[str, ...] = ()
-    #: Excluded from the protein-density ceiling — a supplement rather than a
+    #: Excluded from the protein-density ceiling. A supplement rather than a
     #: meal component, and including it would inflate the bound past anything
     #: a plate of food can reach.
     is_supplement: bool = False
 
     @property
     def protein_density(self) -> float:
-        """Grams of protein per kilocalorie — the scale-free comparison."""
+        """Grams of protein per kilocalorie. The scale-free comparison."""
         return self.protein_g / self.kcal if self.kcal else 0.0
 
 
@@ -55,7 +55,7 @@ class Ingredient:
 # The table
 #
 # `forbidden_keywords` on DietType decides diet compatibility, so entries here
-# carry no diet flags of their own — one source of truth for what a diet
+# carry no diet flags of their own. One source of truth for what a diet
 # excludes, not two that can drift apart.
 # --------------------------------------------------------------------------- #
 
@@ -188,7 +188,7 @@ def max_protein_density(diet: DietType) -> float:
     """The highest grams-of-protein-per-kcal this diet can physically reach.
 
     Computed from the table rather than hardcoded, so adding an ingredient
-    updates the bound automatically. Supplements are excluded — whey powder is
+    updates the bound automatically. Supplements are excluded. Whey powder is
     80% protein and would push the ceiling past anything a plate of food can
     reach, defeating the check.
     """
@@ -214,7 +214,7 @@ def is_protein_claim_possible(
     ~0.15 g/kcal if it is largely soya chunks, so an optimistic-but-achievable
     claim passes. Catching merely implausible composition would need
     ingredient-level quantities, and guessing at those produces false
-    rejections — which cost a regeneration attempt on a plan that was fine.
+    rejections, which cost a regeneration attempt on a plan that was fine.
     """
     if calories_kcal <= 0:
         return False
@@ -263,14 +263,14 @@ class RecipeAnalysis:
         """Whether the totals are worth comparing against a claim.
 
         Below this, too much of the dish is unaccounted for and the computed
-        figure would understate it — reporting a mismatch then would blame the
+        figure would understate it. Reporting a mismatch then would blame the
         model for our table's gaps.
         """
         return self.coverage >= MIN_COVERAGE_FOR_COMPARISON
 
 
 # Below this share of identified mass, the computed macros are treated as
-# indicative only — the gap is our table's, not the recipe's.
+# indicative only. The gap is our table's, not the recipe's.
 MIN_COVERAGE_FOR_COMPARISON = 0.7
 
 
@@ -278,7 +278,7 @@ def analyse_recipe(ingredients) -> RecipeAnalysis:
     """Sum macros over a recipe's weighed ingredients.
 
     Ingredients without a weight (a pinch of hing, two green chillies) are
-    skipped rather than guessed at — they contribute little, and inventing a
+    skipped rather than guessed at. They contribute little, and inventing a
     mass would put made-up numbers into a feature whose whole point is not
     making numbers up.
     """
@@ -366,6 +366,6 @@ def protein_reference_block(diet: DietType, limit: int = 10) -> str:
     lines.append("")
     lines.append(
         "Hitting the protein target means building meals around these. Use real "
-        "portions — the numbers above are per 100g."
+        "portions. The numbers above are per 100g."
     )
     return "\n".join(lines)

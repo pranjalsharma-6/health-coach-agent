@@ -56,7 +56,7 @@ def calculate_bmr(
 ) -> float:
     """Basal metabolic rate via the Mifflin-St Jeor equation.
 
-    Mifflin-St Jeor is the current standard — it outperforms Harris-Benedict on
+    Mifflin-St Jeor is the current standard. It outperforms Harris-Benedict on
     modern populations. For `OTHER`, we average the male and female constants
     rather than defaulting to one, which would systematically misestimate.
     """
@@ -163,7 +163,7 @@ def _goal_adjustment(profile: ProfileBase, tdee: float) -> float:
     """Calorie delta from maintenance, clamped to a safe rate of change.
 
     For fat loss we size the deficit from the user's actual timeline rather than
-    hardcoding 500 kcal — then clamp it, so an over-ambitious timeline produces a
+    hardcoding 500 kcal, then clamp it, so an over-ambitious timeline produces a
     slower plan instead of an unsafe one.
     """
     goal = Goal(profile.goal)

@@ -33,7 +33,7 @@ class DatabaseUnavailableError(RuntimeError):
     """The database is needed for this request and isn't connected.
 
     Distinct from a bare RuntimeError so the API layer can answer 503 with the
-    reason instead of a 500 and a stack trace — a dependency being down is not
+    reason instead of a 500 and a stack trace. A dependency being down is not
     a bug in the endpoint.
     """
 
@@ -63,7 +63,7 @@ def describe_connection_failure(exc: Exception) -> str:
     if "getaddrinfo failed" in detail or "nodename nor servname" in detail:
         return (
             "The database hostname could not be resolved, which means the "
-            "machine has no working DNS — not that the connection string is "
+            "machine has no working DNS, not that the connection string is "
             "wrong. Check the internet connection first. On a campus or office "
             "network, try a phone hotspot: some block outbound MongoDB traffic."
         )
@@ -75,7 +75,7 @@ def describe_connection_failure(exc: Exception) -> str:
         return (
             "The SRV lookup that a 'mongodb+srv://' address needs timed out. "
             "Plain hostname lookups can still work, which is why other tools "
-            "look fine — SRV and TXT queries are a different record type, and "
+            "look fine. SRV and TXT queries are a different record type, and "
             "networks that intercept DNS often drop them. Two ways out: use a "
             "phone hotspot, or switch MONGODB_URI to the non-SRV form. In "
             "Atlas: Connect > Drivers > select an older driver version, which "
@@ -106,7 +106,7 @@ def describe_credential_problem(uri: str) -> Optional[str]:
     pymongo says "must be escaped according to RFC 3986", which is accurate and
     unusable. This names the offending characters and their replacements.
 
-    It never returns the password itself — only which characters appear in it —
+    It never returns the password itself. Only which characters appear in it,
     because the result is written to logs.
     """
     if "://" not in uri:
@@ -117,7 +117,8 @@ def describe_credential_problem(uri: str) -> Optional[str]:
         return None
 
     # rsplit: the *last* @ separates credentials from the host, so a password
-    # containing @ — the whole reason we are here — still splits correctly.
+    # containing @, which is the whole reason we are here, still splits
+    # correctly.
     userinfo, _, _ = rest.rpartition("@")
     username, _, password = userinfo.partition(":")
 
@@ -135,7 +136,7 @@ def describe_credential_problem(uri: str) -> Optional[str]:
         "MONGODB_URI has unescaped characters in the credentials: "
         + "; ".join(problems)
         + ". Replace them in the .env value. Leave the @ that separates the "
-        "password from the hostname alone — only the one *inside* the "
+        "password from the hostname alone. Only the one *inside* the "
         "password gets encoded."
     )
 
@@ -153,6 +154,13 @@ async def connect_to_mongo() -> None:
         _client = AsyncIOMotorClient(
             settings.mongodb_uri,
             server_api=ServerApi("1"),
+            # BSON has no timezone: Mongo stores UTC and hands it back naive.
+            # FastAPI then serialises `2026-08-29T17:34:09` with no offset, and
+            # JavaScript parses an offset-less datetime as *local* time, so
+            # every timestamp in the decision history was wrong by the reader's
+            # UTC offset, five and a half hours in India. Long enough that "5
+            # minutes ago" rendered as "5h ago", or as a moment in the future.
+            tz_aware=True,
             serverSelectionTimeoutMS=8000,
             connectTimeoutMS=8000,
             # Keep connections warm rather than reopening them per request.
@@ -169,7 +177,7 @@ async def connect_to_mongo() -> None:
         await _ensure_indexes()
 
     except InvalidURI as exc:
-        # The connection string itself is malformed — almost always a password
+        # The connection string itself is malformed. Almost always a password
         # with a special character in it, pasted straight from Atlas.
         hint = describe_credential_problem(settings.mongodb_uri)
         _connection_error = hint or str(exc)

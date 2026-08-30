@@ -5,7 +5,7 @@ pydantic-settings JSON-decode the raw environment value inside the env source,
 before any validator ran. The comma-separated form printed in `.env.example`
 and in the deployment guide therefore crashed the app at import time with an
 opaque `SettingsError`. These tests pin every shape the value actually arrives
-in — from a `.env` file locally, and from a real environment variable on Render.
+in. From a `.env` file locally, and from a real environment variable on Render.
 """
 
 import pathlib
@@ -65,7 +65,7 @@ class TestCorsOrigins:
     def test_comma_separated_from_an_environment_variable(
         self, from_env, raw, expected
     ):
-        """Render sets a real env var, not a .env file — a different source
+        """Render sets a real env var, not a .env file. A different source
         class, and it decodes complex fields too."""
         assert from_env(raw).cors_origins == expected
 
@@ -111,8 +111,8 @@ def test_the_shipped_env_example_actually_loads(tmp_path, monkeypatch):
 class TestCuisinePreferences:
     """Cuisine went from one enum to a list.
 
-    People eat across cuisines — North Indian on weekdays, continental at the
-    weekend — and forcing one choice made the plan less like their actual food,
+    People eat across cuisines. North Indian on weekdays, continental at the
+    weekend, and forcing one choice made the plan less like their actual food,
     which is the whole adherence lever. Profiles written before the change hold
     a bare string under the old key, and must keep working.
     """
@@ -148,7 +148,7 @@ class TestCuisinePreferences:
         ).cuisine_preferences == ["north_indian", "mediterranean"]
 
     def test_an_empty_selection_means_mixed(self):
-        """Not an error — "no strong preference" is a real answer, and it is
+        """Not an error. "no strong preference" is a real answer, and it is
         what MIXED encodes. Leaving it empty would strip cuisine guidance from
         the prompt entirely."""
         assert self._profile(cuisine_preferences=[]).cuisine_preferences == ["mixed"]
@@ -170,7 +170,10 @@ class TestCuisinePreferences:
 
         block = build_constraints_block(self._profile(cuisine_preferences=["south_indian"]))
         assert "several cuisines" not in block
-        assert "idli" in block
+        # Case-insensitive: the dish list opens a sentence, so whether it
+        # reads "Idli" or "idli" depends on the punctuation around it and is
+        # not what this test is about.
+        assert "idli" in block.lower()
 
 
 class TestOptionalIntegerSettings:

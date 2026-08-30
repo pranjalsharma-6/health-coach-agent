@@ -1,8 +1,8 @@
 """Tests for the multi-agent planning pipeline.
 
-These check the claims the architecture actually makes — that the specialists
+These check the claims the architecture actually makes, that the specialists
 run concurrently, that a retry redraws only what needs redrawing, and that the
-critic can never make an unsafe plan safe — rather than just that the graph
+critic can never make an unsafe plan safe, rather than just that the graph
 compiles.
 """
 
@@ -182,7 +182,7 @@ class TestPipelineShape:
         first_finish = min(ends.values())
         last_start = max(starts.values())
         assert last_start < first_finish, (
-            "the second specialist started only after the first finished — "
+            "the second specialist started only after the first finished. "
             "the fan-out is running sequentially"
         )
 
@@ -199,7 +199,7 @@ class TestPipelineShape:
         # The nutritionist gets diet constraints and macro targets.
         assert "vegetarian" in meal_prompt
         assert "protein" in meal_prompt
-        # The trainer gets neither — it is told never to prescribe food.
+        # The trainer gets neither. It is told never to prescribe food.
         assert "daily targets" not in training_prompt
         assert "allergies" not in training_prompt
 
@@ -406,7 +406,7 @@ class TestChunkedMealDrafting:
 
     Seven days of four meals is 28 nested objects, and models lose count over
     that distance. The observed run produced, in order: a two-day week, a day
-    with three meals, and an egg in a vegetarian plan — consistency failures
+    with three meals, and an egg in a vegetarian plan. Consistency failures
     across a long output, not errors of judgement. The codebase already argues
     that small structured outputs are the reliable ones; this applies it one
     level down from the specialist split.
@@ -498,7 +498,7 @@ class TestFeedbackCannotBreakTheDiet:
     """Constraints are restated after any feedback.
 
     The reviewer asked for more variety and the next draft answered with eggs
-    in a vegetarian plan. The diet rules were in the prompt — they had just
+    in a vegetarian plan. The diet rules were in the prompt. They had just
     stopped being the last thing the model read.
     """
 

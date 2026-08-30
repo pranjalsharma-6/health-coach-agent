@@ -3,7 +3,7 @@
     python -m evals.run
 
 Reports how well the agent decides and how well the validator catches bad
-plans. Deterministic — no LLM, no database, no network — so the numbers are
+plans. Deterministic. No LLM, no database, no network, so the numbers are
 comparable across runs and safe to gate CI on.
 """
 
@@ -64,7 +64,7 @@ class EvalReport:
 
     @property
     def scored_validators(self) -> List[ValidatorResult]:
-        """Cases excluding documented gaps — the honest headline number."""
+        """Cases excluding documented gaps. The honest headline number."""
         return [v for v in self.validators if not v.known_gap]
 
     @property
@@ -76,7 +76,7 @@ class EvalReport:
 
     @property
     def false_positives(self) -> List[ValidatorResult]:
-        """Good plans wrongly rejected — the expensive failure mode.
+        """Good plans wrongly rejected. The expensive failure mode.
 
         A false positive burns a regeneration attempt and can exhaust the retry
         budget on a plan that was fine.
@@ -85,7 +85,7 @@ class EvalReport:
 
     @property
     def false_negatives(self) -> List[ValidatorResult]:
-        """Bad plans let through — the dangerous failure mode."""
+        """Bad plans let through. The dangerous failure mode."""
         return [
             v
             for v in self.validators
@@ -211,12 +211,12 @@ def print_report(report: EvalReport) -> None:
     )
 
     if report.false_positives:
-        print("\n  FALSE POSITIVES (good plans rejected — burns retry budget):")
+        print("\n  FALSE POSITIVES (good plans rejected. Burns retry budget):")
         for r in report.false_positives:
             print(f"    - {r.name}: {r.errors[0] if r.errors else '?'}")
 
     if report.false_negatives:
-        print("\n  FALSE NEGATIVES (bad plans accepted — the dangerous kind):")
+        print("\n  FALSE NEGATIVES (bad plans accepted. The dangerous kind):")
         for r in report.false_negatives:
             print(f"    - {r.name}")
 
@@ -232,7 +232,7 @@ def print_report(report: EvalReport) -> None:
     print("\n" + "=" * 78)
     verdict = "PASS" if report.passed else "FAIL"
     print(
-        f"  {verdict} — decisions {report.decision_accuracy:.0%}, "
+        f"  {verdict}. Decisions {report.decision_accuracy:.0%}, "
         f"validator {report.validator_accuracy:.0%}"
     )
     print("=" * 78 + "\n")

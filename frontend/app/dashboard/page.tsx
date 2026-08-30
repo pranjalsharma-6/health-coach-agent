@@ -65,7 +65,7 @@ export default function DashboardPage() {
   const [agentPrompt, setAgentPrompt] = useState<string | null>(null);
   const [dayOverride, setDayOverride] = useState<number | null>(null);
 
-  /** Fetch everything the dashboard needs. Pure IO — touches no state. */
+  /** Fetch everything the dashboard needs. Pure IO. Touches no state. */
   const fetchDashboard = useCallback(async (): Promise<DashboardData> => {
     // One round trip's worth of latency instead of six.
     const [profile, targets, plan, log, snapshot, events, weights] =
@@ -133,7 +133,7 @@ export default function DashboardPage() {
    * disagree for the whole period after midnight but before the 24-hour mark.
    *
    * The local calculation survives only as a fallback for when there is no
-   * snapshot yet, and it now matches the server's method — whole days between
+   * snapshot yet, and it now matches the server's method. Whole days between
    * calendar dates, not elapsed time.
    */
   const todayIndex = useMemo(() => {
@@ -246,7 +246,7 @@ export default function DashboardPage() {
               ? `That's above your maintenance level, so you'd gain about ${targets.estimated_weekly_change_kg} kg a week at this intake. Worth talking to a doctor or dietitian before following it.`
               : targets.estimated_weekly_change_kg === 0
                 ? "That's roughly your maintenance level, so your weight should hold steady."
-                : "You'll lose weight slightly slower than planned — deliberately."}
+                : "You'll lose weight slightly slower than planned, deliberately."}
           </Alert>
         )}
 
@@ -264,7 +264,7 @@ export default function DashboardPage() {
                     snapshot.meals_planned > 0
                       ? [
                           `${snapshot.meals_eaten} of ${snapshot.meals_planned} eaten`,
-                          // A skip is logged too — don't imply nothing happened.
+                          // A skip is logged too. Don't imply nothing happened.
                           snapshot.meals_skipped > 0 &&
                             `${snapshot.meals_skipped} skipped`,
                           snapshot.meals_pending > 0 &&
@@ -401,7 +401,7 @@ export default function DashboardPage() {
             <Card>
               <CardHeader
                 title="Progress"
-                subtitle="Your real weigh-ins — nothing simulated."
+                subtitle="Your real weigh-ins. Nothing simulated."
               />
               <WeightChart
                 points={weights}

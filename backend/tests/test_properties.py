@@ -1,9 +1,9 @@
 """Property-based tests over the nutrition engine and adherence evaluator.
 
 The example-based tests in `test_nutrition.py` check cases someone thought of.
-These check invariants across the *whole* valid input space — every combination
+These check invariants across the *whole* valid input space. Every combination
 of gender, age, height, weight, goal, activity level and timeline the API will
-accept — which is the only way to make a real safety claim about the numbers.
+accept, which is the only way to make a real safety claim about the numbers.
 
 Hypothesis shrinks any counterexample to a minimal failing profile, so a break
 here arrives as a specific, reproducible input rather than a vague suspicion.
@@ -30,7 +30,7 @@ from tests.factories import make_log, make_plan_in_db, make_targets
 # Strategies
 # --------------------------------------------------------------------------- #
 
-# Bounds mirror the Pydantic constraints on ProfileBase — generating outside
+# Bounds mirror the Pydantic constraints on ProfileBase. Generating outside
 # them would only test Pydantic's validators, not our maths.
 profiles = st.builds(
     ProfileBase,
@@ -56,7 +56,7 @@ SETTINGS = settings(
 
 
 # --------------------------------------------------------------------------- #
-# Safety invariants — these are the claims the README makes
+# Safety invariants. These are the claims the README makes
 # --------------------------------------------------------------------------- #
 class TestSafetyInvariants:
     @given(profiles)
@@ -94,7 +94,7 @@ class TestSafetyInvariants:
 
         Hypothesis found the case that makes the distinction matter: a 30 kg,
         100 cm, sedentary 13-year-old has a TDEE of 938 kcal, so raising the
-        target to the 1500 kcal floor leaves a 562 kcal surplus — above the
+        target to the 1500 kcal floor leaves a 562 kcal surplus. Above the
         clamp, on a fat-loss goal. That is the floor doing its job, not the
         clamp failing. What must never happen is a surplus that large arising
         from the goal adjustment alone.
@@ -148,7 +148,7 @@ class TestArithmeticConsistency:
     @given(profiles)
     @SETTINGS
     def test_macros_reconcile_with_the_calorie_target(self, profile: ProfileBase):
-        """Grams must add back up to the target — within rounding.
+        """Grams must add back up to the target. Within rounding.
 
         Carbohydrate absorbs the remainder, so this holds unless the protein and
         fat floors alone already exceed the target, which is a real (logged)
@@ -285,7 +285,7 @@ class TestAdherenceInvariants:
     )
     @SETTINGS
     def test_remaining_is_always_target_minus_consumed(self, consumed, target):
-        """Remaining may legitimately go negative — eating over target is real."""
+        """Remaining may legitimately go negative. Eating over target is real."""
         assume(target > 0)
         targets = make_targets(calories=target, protein=int(target / 12))
         plan = make_plan_in_db(targets, reference_date=TODAY)

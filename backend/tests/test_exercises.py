@@ -1,6 +1,6 @@
 """The exercise table, and what makes a session usable.
 
-The training side used to emit "Strength training — upper body, 45 min" and
+The training side used to emit "Strength training. Upper body, 45 min" and
 call it a plan. That is a category: a beginner cannot act on it, and no check
 downstream can tell a good one from a bad one. The food side had a curated
 table, computed macros and a validator; the training side had a sentence.
@@ -81,7 +81,7 @@ class TestSessionProblems:
 
     def test_an_invented_exercise_is_rejected(self):
         """The whole point of the table is that the model does not make these
-        up — an unknown name has no cue and no known difficulty."""
+        up. An unknown name has no cue and no known difficulty."""
         problems = find_problems(["Turbo shoulder blaster"], self.LEVEL)
         assert any("not in the exercise table" in p for p in problems)
 
@@ -204,7 +204,7 @@ class TestFormCueFallback:
     """The model may leave `cue` empty; the table's cue fills the gap.
 
     Without this the instruction "leave cue empty unless you have something to
-    add" produces sessions with no cues at all — which is the vague
+    add" produces sessions with no cues at all, which is the vague
     prescription again, one level down.
     """
 
@@ -308,7 +308,7 @@ class TestFormCueFallback:
     async def test_the_model_is_not_asked_for_cues_at_all(self):
         """`ExerciseDraft` has no cue field.
 
-        Asking for one produced 35 `"cue": null` fields per week — output the
+        Asking for one produced 35 `"cue": null` fields per week. Output the
         model had to get right for no benefit, in the exact place its JSON was
         drifting.
         """

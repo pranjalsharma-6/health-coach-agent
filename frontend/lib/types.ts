@@ -111,7 +111,7 @@ export interface TargetsResponse {
 
 export interface RecipeIngredient {
   item: string;
-  /** Null for seasonings too small to weigh — never guessed at. */
+  /** Null for seasonings too small to weigh. Never guessed at. */
   quantity_g: number | null;
   preparation: string | null;
 }

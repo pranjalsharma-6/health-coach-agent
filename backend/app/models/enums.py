@@ -1,7 +1,7 @@
 """Domain enums.
 
 These are deliberately explicit rather than free-text. Every value here is a hard
-constraint the planner must respect and the validator can check against — which is
+constraint the planner must respect and the validator can check against, which is
 only possible if the vocabulary is closed.
 """
 
@@ -28,7 +28,7 @@ class DietType(str, Enum):
         """Ingredient keywords that must never appear in a plan for this diet.
 
         Used by the output validator as a cheap, deterministic safety net over
-        the LLM's generation. Not exhaustive — it catches the obvious failures.
+        the LLM's generation. Not exhaustive. It catches the obvious failures.
         """
         meat = [
             "chicken", "mutton", "beef", "pork", "lamb", "bacon", "ham",
@@ -109,7 +109,7 @@ class TrainingStyle(str, Enum):
 
     One list rather than separate "equipment" and "modality" questions.
     Technically those are different axes, but users do not experience them
-    that way — "I swim" already says there is a pool — and two questions is
+    that way. "I swim" already says there is a pool, and two questions is
     twice the onboarding friction for a distinction nobody feels.
 
     This replaces a hardcoded guess that everyone had bodyweight, dumbbells
@@ -156,7 +156,7 @@ class MealType(str, Enum):
 
 
 class MealStatus(str, Enum):
-    """Lifecycle of a single planned meal — the signal the agent senses on."""
+    """Lifecycle of a single planned meal. The signal the agent senses on."""
 
     PLANNED = "planned"
     EATEN = "eaten"

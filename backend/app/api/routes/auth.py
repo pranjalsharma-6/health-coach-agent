@@ -60,7 +60,7 @@ async def login(payload: UserLogin) -> Token:
     """Exchange email and password for an access token."""
     user = await UserRepository.get_by_email(payload.email.lower())
 
-    # Same error for "no such user" and "wrong password" — don't leak which
+    # Same error for "no such user" and "wrong password". Don't leak which
     # emails have accounts.
     if user is None or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(

@@ -1,4 +1,4 @@
-"""Kaya API — FastAPI application entrypoint."""
+"""Kaya API. FastAPI application entrypoint."""
 
 from contextlib import asynccontextmanager
 
@@ -37,8 +37,8 @@ async def lifespan(_: FastAPI):
 def _warn_about_cors() -> None:
     """Say what the browser will be allowed to do, at boot.
 
-    A CORS problem is silent on both sides — the browser reports a missing
-    header, the server logs a request it answered — so the running value is
+    A CORS problem is silent on both sides. The browser reports a missing
+    header, the server logs a request it answered, so the running value is
     printed where it can be compared against the site that is failing. On a
     deployed API that still allows only localhost, nothing on the internet can
     call it, and that deserves the same banner a missing database gets.
@@ -96,8 +96,8 @@ def add_cors(target: FastAPI) -> None:
     """Wire the browser allow list onto an app.
 
     A function rather than three lines inline so a test can exercise the real
-    wiring against a chosen configuration. The alternative — reloading this
-    module with different environment variables — swaps the shared `settings`
+    wiring against a chosen configuration. The alternative. Reloading this
+    module with different environment variables. Swaps the shared `settings`
     object out from under every other module that imported it, which broke
     three unrelated tests before this existed.
     """
@@ -120,7 +120,7 @@ async def _database_unavailable(_: Request, exc: mongo.DatabaseUnavailableError)
     touch it, and a caller can act on "the server cannot reach its database"
     where it cannot act on "Internal Server Error".
     """
-    logger.error("Request failed — database unavailable: %s", exc)
+    logger.error("Request failed. Database unavailable: %s", exc)
 
     content = {"detail": "The server cannot reach its database."}
     if not settings.is_production:
@@ -180,7 +180,7 @@ async def health() -> dict:
         # A CORS misconfiguration is invisible from both ends: the browser only
         # says a header was missing, and the server logs a request it answered
         # normally. Nothing tells you what the server actually believes its
-        # allowed origins are, so a wrong value looks exactly like no value —
+        # allowed origins are, so a wrong value looks exactly like no value,
         # and you cannot tell a trailing slash from a stale deploy.
         #
         # These are not a secret. CORS works by announcing them to any browser

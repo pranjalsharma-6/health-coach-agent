@@ -36,7 +36,7 @@ class TestCredentialDiagnosis:
         """The @ separating credentials from the host is not the broken one.
 
         Splitting on the first @ would read the password as "Secr" and find
-        nothing wrong with it — the failure would go undiagnosed.
+        nothing wrong with it. The failure would go undiagnosed.
         """
         assert mongo.describe_credential_problem(BAD_URI) is not None
 
@@ -165,8 +165,8 @@ def test_get_database_raises_the_typed_error(monkeypatch):
 class TestConnectionFailureMessages:
     """DNS, firewall and auth failures arrive as one exception type.
 
-    They look identical from the outside — a PyMongoError with a wall of
-    topology description — and need completely different responses. A user
+    They look identical from the outside. A PyMongoError with a wall of
+    topology description, and need completely different responses. A user
     whose Wi-Fi dropped was told to check their connection string.
     """
 
@@ -175,8 +175,8 @@ class TestConnectionFailureMessages:
         return mongo.describe_connection_failure(cls(message))
 
     def test_dns_failure_points_at_the_network(self):
-        """`getaddrinfo failed` is one layer below the connection string —
-        the hostname was never even looked up."""
+        """`getaddrinfo failed` is one layer below the connection string.
+        The hostname was never even looked up."""
         message = self._describe(
             "ac-83tbkc0-shard-00-00.wpud7ke.mongodb.net:27017: "
             "[Errno 11001] getaddrinfo failed"
@@ -221,8 +221,8 @@ class TestConnectionFailureMessages:
 class TestSrvLookupFailure:
     """`mongodb+srv://` needs SRV and TXT records, not just a hostname.
 
-    A network can resolve A records perfectly — Test-NetConnection succeeds,
-    the browser works — and still drop SRV queries. Networks that intercept
+    A network can resolve A records perfectly. Test-NetConnection succeeds,
+    the browser works, and still drop SRV queries. Networks that intercept
     DNS commonly do. The failure says "The resolution lifetime expired ... The
     DNS operation timed out", which contains the word "timed out" and was
     therefore read as an unreachable server, sending the user to check the

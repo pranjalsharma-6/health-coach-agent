@@ -45,7 +45,7 @@ export function getToken(): string | null {
   try {
     return window.localStorage.getItem(TOKEN_KEY);
   } catch {
-    // Private mode or blocked site data — treat as signed out rather than crash.
+    // Private mode or blocked site data. Treat as signed out rather than crash.
     return null;
   }
 }
@@ -107,7 +107,7 @@ async function request<T>(
   } catch {
     // Name the address that failed. This message used to say "is the backend
     // running on port 8000?" regardless of where it was deployed, which is
-    // wrong everywhere except a laptop — and worse, the two real causes look
+    // wrong everywhere except a laptop, and worse, the two real causes look
     // identical from inside the browser: an API URL that never reached the
     // build (so it fell back to localhost), and a request the browser blocked
     // for CORS. Printing the URL tells them apart without opening devtools.
@@ -116,7 +116,7 @@ async function request<T>(
       0,
       isLocal
         ? `Can't reach the backend at ${API_BASE}. Is it running on port 8000?`
-        : `Can't reach the API at ${API_BASE}. It may still be waking up — a ` +
+        : `Can't reach the API at ${API_BASE}. It may still be waking up. A ` +
           `free-tier server takes about 40 seconds cold. If this persists, the ` +
           `browser may be blocking the request; check the console for a CORS message.`,
     );
@@ -149,7 +149,7 @@ function extractDetail(body: unknown, status: number): string {
   if (body && typeof body === "object" && "detail" in body) {
     const detail = (body as { detail: unknown }).detail;
     if (typeof detail === "string") {
-      // The backend attaches `reason` outside production — a specific,
+      // The backend attaches `reason` outside production. A specific,
       // actionable cause. Showing only `detail` would hide the one line that
       // says what to fix.
       const reason = (body as { reason?: unknown }).reason;
@@ -305,7 +305,7 @@ export const api = {
           try {
             yield JSON.parse(line.slice(5).trim()) as AgentStep;
           } catch {
-            // A partial frame — skip it rather than killing the run.
+            // A partial frame. Skip it rather than killing the run.
           }
         }
       }

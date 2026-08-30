@@ -3,7 +3,7 @@
 The counterpart to `ingredients.py`, and it exists for the same reason. The
 nutrition side never lets the model choose a number; the training side used to
 let it emit "upper body training, 45 min" and call that a plan. A category is
-not a prescription — a beginner cannot act on it, and nothing downstream can
+not a prescription. A beginner cannot act on it, and nothing downstream can
 check it.
 
 Grounding the trainer in a fixed table does three things:
@@ -16,7 +16,7 @@ Grounding the trainer in a fixed table does three things:
    make a generated workout useless: a session that trains one pattern and
    calls itself full-body, and equipment the user was never asked about.
 
-Rep ranges are the conventional ones for the goal — roughly 8-12 for
+Rep ranges are the conventional ones for the goal. Roughly 8-12 for
 hypertrophy, higher for endurance work, lower with longer rest for strength.
 They are starting points, not prescriptions for a competitive athlete.
 """
@@ -86,7 +86,7 @@ EXERCISES: List[Exercise] = [
     Exercise("Push-ups", Pattern.PUSH, Equipment.NONE, Level.BEGINNER,
              "Keep a straight line from head to heels; don't let the hips sag."),
     Exercise("Knee push-ups", Pattern.PUSH, Equipment.NONE, Level.BEGINNER,
-             "Same straight line from knees to head — this is a full exercise, not a lesser one.",
+             "Same straight line from knees to head. This is a full exercise, not a lesser one.",
              default_reps="10-15"),
     Exercise("Incline push-ups", Pattern.PUSH, Equipment.NONE, Level.BEGINNER,
              "Hands on a bench or table; the higher the surface, the easier it is.",
@@ -105,7 +105,7 @@ EXERCISES: List[Exercise] = [
              "Lean slightly forward; stop when your shoulders reach elbow height.",
              default_reps="6-10"),
     Exercise("Band chest press", Pattern.PUSH, Equipment.BAND, Level.BEGINNER,
-             "Control the return — the band pulling you back is half the work.",
+             "Control the return. The band pulling you back is half the work.",
              default_reps="12-15"),
 
     # --- Pull ---
@@ -170,7 +170,7 @@ EXERCISES: List[Exercise] = [
              "Bar stays against your legs the whole way up. Back flat, never rounded.",
              default_reps="5", default_rest_seconds=180),
     Exercise("Single-leg deadlift", Pattern.HINGE, Equipment.DUMBBELL, Level.INTERMEDIATE,
-             "Hips square to the floor — resist rotating open.",
+             "Hips square to the floor. Resist rotating open.",
              default_reps="8-10 each side"),
     Exercise("Good mornings", Pattern.HINGE, Equipment.BARBELL, Level.ADVANCED,
              "Light weight. This is a hinge, not a squat.", default_reps="8-12"),
@@ -248,14 +248,14 @@ EXERCISES: List[Exercise] = [
              "One breath per movement; don't rush the transitions.", default_sets=3,
              default_reps="5 rounds", default_rest_seconds=30),
     Exercise("Downward dog hold", Pattern.MOBILITY, Equipment.NONE, Level.BEGINNER,
-             "Bend your knees freely — a long spine matters more than straight legs.",
+             "Bend your knees freely. A long spine matters more than straight legs.",
              default_sets=3, default_reps="30 seconds", default_rest_seconds=30),
     Exercise("Pigeon pose", Pattern.MOBILITY, Equipment.NONE, Level.INTERMEDIATE,
              "Keep your hips square; prop the near hip on a cushion if it lifts.",
              default_sets=1, default_reps="60 seconds each side", default_rest_seconds=0),
 
     # --- Swimming ---
-    Exercise("Easy swim — freestyle", Pattern.CARDIO, Equipment.NONE, Level.BEGINNER,
+    Exercise("Easy swim. Freestyle", Pattern.CARDIO, Equipment.NONE, Level.BEGINNER,
              "Breathe every third stroke to keep your stroke even on both sides.",
              default_sets=1, default_reps="20-30 minutes", default_rest_seconds=0),
     Exercise("Swim intervals", Pattern.CARDIO, Equipment.NONE, Level.INTERMEDIATE,
@@ -277,7 +277,7 @@ _STYLE_OVERRIDES: Dict[str, FrozenSet[TrainingStyle]] = {
     "easy jog": frozenset({TrainingStyle.RUNNING_CYCLING}),
     "cycling": frozenset({TrainingStyle.RUNNING_CYCLING}),
     "interval sprints": frozenset({TrainingStyle.RUNNING_CYCLING}),
-    "easy swim — freestyle": frozenset({TrainingStyle.SWIMMING}),
+    "easy swim. Freestyle": frozenset({TrainingStyle.SWIMMING}),
     "swim intervals": frozenset({TrainingStyle.SWIMMING}),
     "kickboard drill": frozenset({TrainingStyle.SWIMMING}),
     "pull buoy drill": frozenset({TrainingStyle.SWIMMING}),
@@ -303,7 +303,7 @@ def styles_of(exercise: Exercise) -> FrozenSet[TrainingStyle]:
         return override
 
     if exercise.pattern is Pattern.MOBILITY:
-        # Mobility is universal — everyone benefits, nobody needs anything.
+        # Mobility is universal. Everyone benefits, nobody needs anything.
         return frozenset(TrainingStyle)
 
     if exercise.equipment in _GYM_ONLY:
@@ -366,7 +366,7 @@ def find_problems(
     """What is wrong with this session, if anything.
 
     Deliberately narrow. It checks the things that make a generated workout
-    unusable rather than merely suboptimal — programming taste is the model's
+    unusable rather than merely suboptimal. Programming taste is the model's
     to argue about, safety and feasibility are not.
     """
     problems: List[str] = []
@@ -378,7 +378,7 @@ def find_problems(
         exercise = find(name)
         if exercise is None:
             problems.append(
-                f"'{name}' is not in the exercise table — use one that is, so "
+                f"'{name}' is not in the exercise table. Use one that is, so "
                 "the form cue and the difficulty are known."
             )
             continue

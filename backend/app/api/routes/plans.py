@@ -6,7 +6,12 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from app.agent.graph import generate_recipe
-from app.agent.llm import LLMUnavailableError, describe_llm_failure, is_configured
+from app.agent.llm import (
+    LLMUnavailableError,
+    describe_llm_failure,
+    failure_text,
+    is_configured,
+)
 from app.api.deps import CurrentProfile, CurrentUser
 from app.core.logging import get_logger
 from app.db.repositories import PlanRepository
@@ -53,7 +58,7 @@ async def get_active_plan(user: CurrentUser) -> Optional[PlanInDB]:
 
 @router.get("/history", response_model=List[PlanSummary])
 async def get_plan_history(user: CurrentUser, limit: int = 20) -> List[PlanSummary]:
-    """Every plan version, newest first — the agent's decision history."""
+    """Every plan version, newest first. The agent's decision history."""
     plans = await PlanRepository.list_history(str(user.id), limit=limit)
     return [
         PlanSummary(
@@ -149,10 +154,10 @@ async def expand_recipe(
         logger.exception("Recipe generation failed for meal %s", meal_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Could not generate the recipe. {describe_llm_failure(exc).message}",
+            detail=f"Could not generate the recipe. {failure_text(describe_llm_failure(exc))}",
         ) from exc
 
-    # Cache it back into the plan without creating a new version — enrichment
+    # Cache it back into the plan without creating a new version. Enrichment
     # isn't a planning decision and shouldn't appear in the history.
     target_meal.recipe = recipe
     await PlanRepository.replace_active(plan)

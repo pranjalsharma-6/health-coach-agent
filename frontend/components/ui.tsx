@@ -193,7 +193,7 @@ export function Input({
 }
 
 /**
- * A selectable card. Used throughout onboarding — bigger tap targets and room
+ * A selectable card. Used throughout onboarding. Bigger tap targets and room
  * for a description beat a dropdown when the choice actually matters.
  */
 export function ChoiceCard({

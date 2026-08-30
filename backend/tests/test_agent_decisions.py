@@ -1,7 +1,7 @@
 """Tests for the agent's decision rules and adherence computation.
 
 The decision to intervene in someone's diet is made deterministically, which
-means it can be tested exhaustively — no LLM, no database, no flakiness.
+means it can be tested exhaustively. No LLM, no database, no flakiness.
 """
 
 from datetime import date, timedelta

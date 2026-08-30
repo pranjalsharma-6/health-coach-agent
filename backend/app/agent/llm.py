@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 # The unit of work is a *meal*, not a day. `meals_per_day` is a profile
 # setting: four meals a day writes a third more JSON than three, and five
 # writes two thirds more. A budget that only counted days under-reserved for
-# exactly those users, on every attempt, forever — the model wrote until it hit
+# exactly those users, on every attempt, forever. The model wrote until it hit
 # the ceiling mid-array and the call came back as `tool_use_failed`.
 #
 # And thinking is charged to the same reservation. A reasoning model emits its
@@ -48,7 +48,7 @@ TOKENS_PER_SESSION = 215    # an activity plus three or four exercises
 PLAN_SCAFFOLDING = 450      # title, reasoning, day wrappers, braces, tool call
 
 # Room to think in, on top of the answer. Charged to the same reservation and
-# not separately controllable — LLM_REASONING_EFFORT changes how much a model
+# not separately controllable. LLM_REASONING_EFFORT changes how much a model
 # spends, not whether it comes out of this budget.
 REASONING_HEADROOM = 500
 
@@ -62,7 +62,7 @@ MAX_RETRY_GROWTH = 2.0
 #
 # A 429 is waited out; a 413 is not. Providers refuse outright when the
 # reservation alone crowds the per-minute limit, and that refusal is not
-# retryable — so growth that solves a truncation by asking for 7000 tokens has
+# retryable, so growth that solves a truncation by asking for 7000 tokens has
 # traded a recoverable failure for a fatal one. Sized to leave room for the
 # prompt inside Groq's 8000-token free tier, the tightest limit this runs on.
 # Raise it with LLM_MAX_TOKENS... which is a ceiling, so: a user on a roomier
@@ -96,6 +96,36 @@ class LLMFailure:
     message: str
     retryable: bool
 
+    @property
+    def public(self) -> str:
+        """The same failure, said to someone who is waiting for dinner.
+
+        `message` is written for whoever can fix it: it names settings, token
+        budgets and HTTP statuses. That is the right thing to put in a log and
+        the wrong thing to put in front of a person who asked for a meal plan.
+        They cannot act on any of it, and being shown the machinery makes a
+        working product feel broken.
+
+        So the timeline shows this, and the log keeps the other.
+        """
+        if self.retryable:
+            return "That attempt did not come together. Trying again."
+        return (
+            "Kaya could not reach its kitchen just now. Your existing plan is "
+            "unchanged, and you can try again in a few minutes."
+        )
+
+
+def failure_text(failure: "LLMFailure") -> str:
+    """What to show, given who is watching.
+
+    In development the technical message is what you want, and hiding it would
+    mean debugging by guesswork. In production nobody reading the timeline can
+    act on a token budget, so they get the plain version and the detail goes to
+    the logs.
+    """
+    return failure.public if settings.is_production else failure.message
+
 
 def describe_llm_failure(exc: Exception) -> LLMFailure:
     """Turn a provider exception into something a human can act on.
@@ -127,7 +157,7 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
         if replacement:
             return LLMFailure(
                 f"The model '{named}' is no longer available. The provider "
-                f"suggests '{replacement}' — set LLM_MODEL={replacement} in "
+                f"suggests '{replacement}'. Set LLM_MODEL={replacement} in "
                 "backend/.env and restart.",
                 retryable=False,
             )
@@ -147,7 +177,7 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
 
     if status in (401, 403):
         return LLMFailure(
-            "The API key was rejected. Check GROQ_API_KEY in backend/.env — "
+            "The API key was rejected. Check GROQ_API_KEY in backend/.env. "
             "it should start with 'gsk_' and have no quotes or trailing spaces.",
             retryable=False,
         )
@@ -155,7 +185,7 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
     if status == 413:
         # Deliberately no longer "try LLM_MAX_TOKENS=1500". A plan needs more
         # than that, so following it trades a 413 for a plan truncated in the
-        # middle of Tuesday — which is harder to recognise, not easier.
+        # middle of Tuesday, which is harder to recognise, not easier.
         return LLMFailure(
             "The request was larger than your provider plan allows. Providers "
             "count the output tokens you reserve against your per-minute "
@@ -169,11 +199,11 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
     if status == 429:
         # A per-minute limit and a per-day one are the same status code and a
         # completely different problem. Waiting works for the first and is
-        # useless for the second — telling a user to "wait a minute" when they
+        # useless for the second. Telling a user to "wait a minute" when they
         # have spent their day's allowance sends them in circles.
         # What decides the response is how long the wait is, not which
         # quota was hit. Google reports a *daily* request quota and then says
-        # "retry in 31s", because the window rolls — refusing to wait there
+        # "retry in 31s", because the window rolls. Refusing to wait there
         # would throw away a run that was half a minute from working.
         hinted = parse_retry_after_seconds(detail, cap=None)
         waitable = hinted is not None and hinted <= MAX_RATE_LIMIT_WAIT_SECONDS
@@ -204,7 +234,7 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
     if status == 400:
         # Neither `tool_use_failed` nor `json_validate_failed` is a malformed
         # request. Both mean the model was asked for structured output and did
-        # not manage to produce it *this time* — a missed tool call, or JSON
+        # not manage to produce it *this time*. A missed tool call, or JSON
         # that stopped closing its braces partway through a long array. That is
         # precisely what the retry budget exists for, and lumping them in with
         # genuine 400s meant one attempt and no second chance.
@@ -217,7 +247,7 @@ def describe_llm_failure(exc: Exception) -> LLMFailure:
                 ""
                 if settings.llm_max_tokens is None
                 else " LLM_MAX_TOKENS in backend/.env caps how much more it "
-                "can reserve — raise it or remove the line if this repeats."
+                "can reserve. Raise it or remove the line if this repeats."
             )
             return LLMFailure(
                 "The model did not finish the structured output the plan "
@@ -255,7 +285,7 @@ def budget_for(
 ) -> int:
     """How many output tokens this call may reserve.
 
-    Sized to the work in front of it — this many meals over this many days —
+    Sized to the work in front of it. This many meals over this many days,
     plus room to think, and widened on each retry so a second attempt is a
     different request rather than the same one.
 
@@ -313,7 +343,7 @@ def _days_per_call(schema_name: str) -> int:
 # Model names do not travel between providers, so each carries its own
 # default. `LLM_MODEL` overrides whichever is selected.
 # These go stale. Providers retire models on their own schedule, and a default
-# written down once is a default that is wrong later — `gemini-2.5-flash` was
+# written down once is a default that is wrong later. `gemini-2.5-flash` was
 # correct when it was written and refused for new keys by the time it shipped.
 # `check_llm` lists what a key can actually reach, and the 404 below repeats
 # whatever replacement the provider names.
@@ -327,7 +357,7 @@ DEFAULT_MODELS = {
 def resolve_provider() -> Optional[str]:
     """Which provider to use: the configured one, else whichever key exists.
 
-    Explicit beats implicit — but with one key set, asking someone to also name
+    Explicit beats implicit, but with one key set, asking someone to also name
     the provider is a second chance to get it wrong.
     """
     if settings.llm_provider:
@@ -350,14 +380,14 @@ def resolve_model(provider: str) -> str:
 # Which provider a model name plainly belongs to.
 #
 # `LLM_MODEL` is applied to whichever provider is active, so a name left behind
-# from trying a different one is invisible until the API refuses it — a Gemini
+# from trying a different one is invisible until the API refuses it. A Gemini
 # model posted to `api.groq.com` comes back as a bare 404 "model_not_found",
 # which reads like a retired model rather than a line in `.env` pointing at the
 # wrong vendor. The names are distinctive enough to catch that before the call.
 #
 # Order matters: Google's own form is `models/gemini-3.6-flash`, and every other
 # namespaced id (`openai/gpt-oss-120b`, `meta-llama/llama-4-scout-17b`) is
-# Groq's convention of prefixing a model with whoever trained it — which says
+# Groq's convention of prefixing a model with whoever trained it, which says
 # nothing about who serves it.
 _GEMINI_NAME = re.compile(r"^(?:models/)?gemini[-_.]", re.IGNORECASE)
 _OPENAI_NAME = re.compile(r"^(?:gpt-(?!oss)|chatgpt-|o[1-9](?:$|-))", re.IGNORECASE)
@@ -419,8 +449,8 @@ def describe_model_mismatch(provider: str, model: str) -> Optional[str]:
 def configuration_problem() -> Optional[str]:
     """The reason the LLM configuration cannot work, if there is one.
 
-    Separate from `resolve_model()` so that `check_llm` — the tool you run to
-    fix exactly this — can still report what is configured instead of dying on
+    Separate from `resolve_model()` so that `check_llm`. The tool you run to
+    fix exactly this. Can still report what is configured instead of dying on
     it.
     """
     provider = resolve_provider()
@@ -559,7 +589,7 @@ def get_structured_llm(
     validator in `validators.py` is the second, because schema-valid output can
     still be nutritionally wrong or violate the user's diet.
 
-    `meals_per_day` and `attempt` only size the output reservation — see
+    `meals_per_day` and `attempt` only size the output reservation. See
     `budget_for`. They are keyword-only so a caller cannot pass one as the
     other and quietly reserve a plan's worth of tokens for a recipe.
     """
@@ -587,7 +617,7 @@ def provider_supports_json_mode() -> bool:
     """Which providers understand `with_structured_output(method=...)`.
 
     Gemini does not. Silently ignoring the setting is better than failing, but
-    only because the alternative path works — this is not a preference.
+    only because the alternative path works. This is not a preference.
     """
     return resolve_provider() in {"groq", "openai"}
 
@@ -596,7 +626,7 @@ class _NeverNone:
     """Turn a silent `None` into an error that names itself.
 
     LangChain's structured-output parsers return None when they cannot coerce a
-    response — no exception, no message. The None then travels until something
+    response. No exception, no message. The None then travels until something
     reads an attribute off it, and the traceback points at `draft.days` in the
     graph rather than at the model call that produced nothing. Failing here
     keeps the diagnosis next to the cause, and makes it retryable like any
@@ -612,7 +642,7 @@ class _NeverNone:
         if result is None:
             raise ValueError(
                 f"The model returned nothing usable for {self._schema_name}. "
-                "Its reply could not be read as the required structure — often "
+                "Its reply could not be read as the required structure. Often "
                 "a response that was empty, truncated, or blocked."
             )
         return result
@@ -670,7 +700,7 @@ def is_daily_limit(message: str) -> bool:
     """Is this a per-day allowance rather than a per-minute one?
 
     Groq names it in the error text: "on tokens per day (TPD)". The status code
-    is 429 either way, so without this the two are indistinguishable — and they
+    is 429 either way, so without this the two are indistinguishable, and they
     call for opposite responses.
     """
     lowered = message.lower()
@@ -680,7 +710,7 @@ def is_daily_limit(message: str) -> bool:
 
 
 def describe_wait(message: str) -> str:
-    """", and the provider suggests waiting about 9 minutes" — or nothing.
+    """", and the provider suggests waiting about 9 minutes", or nothing.
 
     Read from the provider's own text rather than estimated, and phrased as a
     clause so it drops cleanly into a sentence when absent.
@@ -698,7 +728,7 @@ def parse_retry_after_seconds(
 ) -> Optional[float]:
     """How long the provider asked us to wait, if it said.
 
-    Groq phrases it inside the error text — "Please try again in 1m13.5s" —
+    Groq phrases it inside the error text. "Please try again in 1m13.5s",
     rather than only in a header, and the header is not reachable through the
     exception LangChain surfaces. Honouring the provider's own number beats
     guessing at one.
@@ -768,7 +798,7 @@ class _JsonModeAdapter:
 
     Under `function_calling` the provider is handed the schema and constrains
     the output to it. Under `json_mode` it only promises valid JSON, so the
-    shape has to be in the prompt — otherwise the model returns well-formed
+    shape has to be in the prompt. Otherwise the model returns well-formed
     JSON of entirely the wrong shape and the parse fails downstream, which
     looks like a model problem rather than a missing instruction.
 
@@ -811,7 +841,7 @@ def build_json_mode_instruction(schema: Any) -> str:
     import json
 
     return (
-        "\n\nReturn a single JSON object and nothing else — no prose, no "
+        "\n\nReturn a single JSON object and nothing else. No prose, no "
         "markdown fences. It must match this JSON Schema exactly:\n\n"
         + json.dumps(schema.model_json_schema(), indent=2)
     )

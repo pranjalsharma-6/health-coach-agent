@@ -30,7 +30,7 @@ def _to_object_id(value: str) -> Optional[ObjectId]:
 
 
 def _iso_date(value: date) -> str:
-    """Mongo has no date type — store dates as ISO strings for stable sorting."""
+    """Mongo has no date type. Store dates as ISO strings for stable sorting."""
     return value.isoformat()
 
 
@@ -109,7 +109,7 @@ class PlanRepository:
         """Insert a plan and deactivate any previous active plan atomically enough.
 
         Deactivate-then-insert (rather than the reverse) means a crash between the
-        two leaves the user with no active plan — recoverable by running the agent —
+        two leaves the user with no active plan. Recoverable by running the agent,
         rather than two active plans, which would be ambiguous.
         """
         db = get_database()

@@ -6,7 +6,7 @@ Run from backend/ with the venv active:
 
 Exists because providers retire models on a rolling schedule. When that happens
 the agent fails with a 404 and the only useful next step is "find out what your
-key can reach now" — which otherwise means digging through provider docs that
+key can reach now", which otherwise means digging through provider docs that
 may already be out of date.
 """
 
@@ -59,7 +59,7 @@ async def _fetch_models(provider: str, key: str) -> list[str]:
 def looks_like_a_chat_model(name: str) -> bool:
     """Filter out speech, embedding and moderation models.
 
-    The list is long and mostly irrelevant — you want the ones that can hold a
+    The list is long and mostly irrelevant. You want the ones that can hold a
     conversation and return structured output. `orpheus` and `canopylabs` are
     here because a real run listed speech models whose names contain none of
     the obvious giveaways, and they were offered as candidates for planning.
@@ -94,7 +94,7 @@ def rank_for_structured_output(names: list[str]) -> list[str]:
     """Best candidate first.
 
     Sorted by advertised size, largest first. Models that publish no size sort
-    last rather than first — an unlabelled name is not evidence of capability,
+    last rather than first. An unlabelled name is not evidence of capability,
     and the previous behaviour (alphabetical) recommended a 7B Arabic model
     over a 120B general one purely because 'a' sorts before 'o'.
     """
@@ -102,7 +102,7 @@ def rank_for_structured_output(names: list[str]) -> list[str]:
 
 
 async def main() -> int:
-    _print("Kaya — LLM configuration check")
+    _print("Kaya. LLM configuration check")
     _print("=" * 60)
 
     provider = resolve_provider()
@@ -123,7 +123,7 @@ async def main() -> int:
     _print(f"Key           : {key[:7]}…{key[-4:]} ({len(key)} chars)")
     _print(f"Model         : {model}")
     if not settings.llm_model:
-        _print("                (provider default — set LLM_MODEL to override)")
+        _print("                (provider default. Set LLM_MODEL to override)")
     _print()
 
     mismatch = describe_model_mismatch(provider, model)
@@ -158,12 +158,12 @@ async def main() -> int:
     )
 
     if model in models:
-        _print(f"OK — '{model}' is available. Nothing to change.")
+        _print(f"OK. '{model}' is available. Nothing to change.")
         _print()
         _print("If the agent still fails, the problem is not the model name.")
         return 0
 
-    _print(f"PROBLEM — '{model}' is NOT available on this key.")
+    _print(f"PROBLEM. '{model}' is NOT available on this key.")
     _print("This is what produces the 404 / NotFoundError in the run timeline.")
     _print()
     _print("Chat models your key CAN use, most capable first:")

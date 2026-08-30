@@ -42,7 +42,7 @@ def make_profile(**overrides) -> ProfileInDB:
 
 
 def make_targets(calories: int = 2000, protein: int = 170) -> NutritionTargets:
-    # Fat at 25% of calories, carbs absorb the remainder — mirrors the real engine.
+    # Fat at 25% of calories, carbs absorb the remainder. Mirrors the real engine.
     fat_g = round(calories * 0.25 / 9)
     carbs_g = round((calories - protein * 4 - fat_g * 9) / 4)
     return NutritionTargets(
@@ -80,10 +80,10 @@ def make_meal(
 
 
 # A valid beginner session: four patterns, no equipment at all, every movement
-# in the table. Equipment-free on purpose — bodyweight is the default training
+# in the table. Equipment-free on purpose. Bodyweight is the default training
 # style, so this fixture stays valid for a profile that made no choices.
 def make_exercises(draft: bool = False) -> list:
-    """`draft=True` returns the trainer's output shape, which carries no cue —
+    """`draft=True` returns the trainer's output shape, which carries no cue,
     that is filled from the exercise table during assembly."""
     from app.models.plan import ExerciseDraft, ExercisePrescription
 
@@ -129,7 +129,7 @@ def make_day(day: int, targets: NutritionTargets, meals_per_day: int = 4) -> Dai
         day=day,
         meals=meals,
         activity=ActivityItem(
-            activity_type="Strength training — full body",
+            activity_type="Strength training. Full body",
             duration_minutes=45,
             intensity="moderate",
             description="Compound lifts, focus on form.",
@@ -232,7 +232,7 @@ def make_meal_draft(
 
 
 def make_training_draft(days: int = 7) -> "TrainingPlanDraft":
-    """The trainer's half — a sane week with one genuine rest day."""
+    """The trainer's half. A sane week with one genuine rest day."""
     from app.models.plan import DayTraining, TrainingPlanDraft
 
     def activity(day: int) -> "ActivityDraft":
@@ -247,7 +247,7 @@ def make_training_draft(days: int = 7) -> "TrainingPlanDraft":
             )
         hard = bool(day % 2)
         return ActivityDraft(
-            activity_type="Strength training — full body" if hard else "Brisk walk",
+            activity_type="Strength training. Full body" if hard else "Brisk walk",
             duration_minutes=45 if hard else 30,
             intensity="moderate" if hard else "low",
             description=(

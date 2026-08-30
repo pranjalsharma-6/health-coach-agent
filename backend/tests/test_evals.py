@@ -46,14 +46,14 @@ def test_validator_has_no_false_positives():
 def test_known_gaps_have_not_silently_changed():
     """Pin the documented misses.
 
-    If one starts being caught, that's good news — but the note claiming it's a
+    If one starts being caught, that's good news, but the note claiming it's a
     gap is then stale, so the suite should say so rather than drift.
     """
     report = run()
 
     unexpectedly_caught = [v.name for v in report.known_gaps if v.did_reject]
     assert not unexpectedly_caught, (
-        "These are recorded as known gaps but are now detected — update the "
+        "These are recorded as known gaps but are now detected. Update the "
         "notes in evals/scenarios.py: " + ", ".join(unexpectedly_caught)
     )
 

@@ -2,7 +2,7 @@ import type { Activity } from "@/lib/types";
 
 /** The day's training, as something you can follow rather than a category.
  *
- * "Strength training — upper body · 45 min" tells you nothing you can act on.
+ * "Strength training. Upper body · 45 min" tells you nothing you can act on.
  * The exercises, their sets and reps, and one form cue each are the difference
  * between a label and a session.
  */

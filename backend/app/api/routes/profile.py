@@ -36,7 +36,7 @@ class TargetsResponse(BaseModel):
 
 @router.post("", response_model=ProfileInDB, status_code=status.HTTP_201_CREATED)
 async def create_profile(payload: ProfileCreate, user: CurrentUser) -> ProfileInDB:
-    """Complete onboarding. Idempotent — resubmitting replaces the profile."""
+    """Complete onboarding. Idempotent. Resubmitting replaces the profile."""
     profile = await ProfileRepository.upsert(
         ProfileInDB(user_id=str(user.id), **payload.model_dump())
     )
@@ -68,7 +68,7 @@ async def update_profile(payload: ProfileUpdate, user: CurrentUser) -> ProfileIn
 async def read_targets(profile: CurrentProfile) -> TargetsResponse:
     """Return computed nutrition targets.
 
-    These come from `services.nutrition` — pure arithmetic, no LLM involved.
+    These come from `services.nutrition`. Pure arithmetic, no LLM involved.
     """
     energy = calculate_energy_profile(profile)
     targets = calculate_targets(profile)

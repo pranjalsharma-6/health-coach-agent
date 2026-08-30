@@ -1,4 +1,4 @@
-"""Log models — the sensing half of the agent loop.
+"""Log models. The sensing half of the agent loop.
 
 Everything the agent reacts to enters the system through here.
 """
@@ -69,7 +69,7 @@ class DailyMetricsRequest(BaseModel):
 class AdherenceSnapshot(BaseModel):
     """Deterministic evaluation of how the user is tracking.
 
-    Computed in plain Python from logs — this is evidence, not model output.
+    Computed in plain Python from logs. This is evidence, not model output.
     It is what the agent's decision is made from.
     """
 
@@ -97,7 +97,7 @@ class AdherenceSnapshot(BaseModel):
     steps: Optional[int] = None
     sleep_hours: Optional[float] = None
 
-    # Multi-day signals — the difference between a bad day and a bad pattern.
+    # Multi-day signals. The difference between a bad day and a bad pattern.
     skip_streak_days: int = 0
     skips_last_7_days: int = 0
     adherence_rate_7d: float = Field(
@@ -107,7 +107,7 @@ class AdherenceSnapshot(BaseModel):
         default=0,
         description=(
             "How many meals the rate is computed from. Callers must check this "
-            "before acting on the rate — 1 skip out of 2 is not a 50% habit."
+            "before acting on the rate. 1 skip out of 2 is not a 50% habit."
         ),
     )
 

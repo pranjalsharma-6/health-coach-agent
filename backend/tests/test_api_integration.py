@@ -1,7 +1,7 @@
 """End-to-end API tests against an in-memory Mongo.
 
-Covers the whole request path — auth, dependency injection, repositories,
-serialisation — without needing a database server or an LLM. The agent's LLM
+Covers the whole request path. Auth, dependency injection, repositories,
+serialisation, without needing a database server or an LLM. The agent's LLM
 call is stubbed; everything around it is real.
 """
 
@@ -442,7 +442,7 @@ class TestLogging:
         ]
 
     async def test_weight_series_is_empty_rather_than_synthetic(self, client):
-        """No fabricated trend line — an empty chart is the honest answer."""
+        """No fabricated trend line. An empty chart is the honest answer."""
         token = await register(client)
         await client.post(f"{BASE}/profile", json=PROFILE_PAYLOAD, headers=auth(token))
 
@@ -516,7 +516,7 @@ def _stub_llm(monkeypatch, *plans: HealthPlan) -> None:
     """Replace each specialist's LLM with one returning fixed output.
 
     Takes whole `HealthPlan`s for readability at the call site, then splits each
-    into the nutritionist's and trainer's halves — the graph asks for those two
+    into the nutritionist's and trainer's halves. The graph asks for those two
     schemas separately now. The last plan repeats if the agent takes more
     attempts than provided.
     """

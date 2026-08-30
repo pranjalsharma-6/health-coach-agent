@@ -8,7 +8,7 @@ const STORAGE_KEY = "kaya-theme";
 const CHANGE_EVENT = "kaya-theme-change";
 
 /** The theme lives on <html data-theme>, set before paint by the inline script
- * in `app/layout.tsx`. That attribute is the single source of truth — reading
+ * in `app/layout.tsx`. That attribute is the single source of truth. Reading
  * it here rather than keeping a parallel copy in React state means the two can
  * never disagree.
  */
@@ -29,7 +29,7 @@ function getSnapshot(): Theme | null {
 
 /** The server has no way to know a visitor's system preference, so it renders
  * the neutral state and the client fills it in. `useSyncExternalStore` exists
- * for exactly this and hydrates without a mismatch — reading the DOM in an
+ * for exactly this and hydrates without a mismatch. Reading the DOM in an
  * effect and calling setState would work too, but it is the pattern that
  * causes a flash of the wrong icon.
  */

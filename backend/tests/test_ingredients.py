@@ -29,7 +29,7 @@ class TestTableIntegrity:
 
         # Atwater (4/4/9) counts total carbohydrate, but dietary fibre is only
         # partly metabolised, so whole foods always derive a little high. On a
-        # 23 kcal food like spinach that gap is ~6 kcal — trivial in absolute
+        # 23 kcal food like spinach that gap is ~6 kcal. Trivial in absolute
         # terms but a 29% relative drift, so a purely relative bound would
         # reject correct data. Allow whichever margin is more forgiving.
         assert relative <= 0.25 or absolute <= 8, (
@@ -95,7 +95,7 @@ class TestProteinCeiling:
         assert ing.max_protein_density(DietType.VEGETARIAN) < whey.protein_density
 
     def test_real_foods_are_never_flagged_impossible(self):
-        """Every row must pass its own diet's ceiling — else it's self-refuting."""
+        """Every row must pass its own diet's ceiling. Else it's self-refuting."""
         for diet in DietType:
             for item in ing.allowed_for(diet):
                 if item.is_supplement or item.kcal <= 0:

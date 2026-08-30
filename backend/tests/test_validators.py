@@ -65,7 +65,7 @@ class TestDietCompliance:
         assert not result.is_valid
 
     def test_word_boundary_prevents_false_positives(self):
-        """'ham' must not fire on 'hamper' — a naive substring check would."""
+        """'ham' must not fire on 'hamper'. A naive substring check would."""
         targets = make_targets()
         plan = make_health_plan(targets)
         plan.daily_plans[0].meals[0].description = "Pack it in a tiffin hamper."
@@ -135,7 +135,7 @@ class TestNutritionAccuracy:
         assert any("protein" in e for e in result.errors)
 
     def test_overshooting_protein_is_allowed(self):
-        """More protein than target is fine — only shortfalls are failures."""
+        """More protein than target is fine. Only shortfalls are failures."""
         targets = make_targets(calories=2000, protein=140)
         plan = make_health_plan(targets)
 

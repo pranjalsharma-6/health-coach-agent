@@ -39,7 +39,7 @@ const NODE_ICONS: Record<string, string> = {
 
 interface Props {
   onComplete: (result: { decision?: string; planId?: string | null }) => void;
-  /** Rendered above the button — e.g. "you skipped lunch, want a rebalance?" */
+  /** Rendered above the button. E.g. "you skipped lunch, want a rebalance?" */
   prompt?: string | null;
 }
 
@@ -51,7 +51,7 @@ export function AgentRunner({ onComplete, prompt }: Props) {
 
   // The prompt that was showing when the current run started. Comparing against
   // it tells us whether an incoming recommendation is newer than the last run's
-  // result — without which `finished` sticks around and permanently suppresses
+  // result, without which `finished` sticks around and permanently suppresses
   // every later prompt, so logging a skip after a successful run looks like
   // nothing happened. Derived rather than synced in an effect.
   const [promptAtRun, setPromptAtRun] = useState<string | null>(null);
@@ -177,7 +177,7 @@ export function AgentRunner({ onComplete, prompt }: Props) {
       {finished && !promptIsNew && !error && decision && (
         <Alert tone="success" title={DECISION_LABELS[decision] ?? "Done"}>
           {decision === "no_action"
-            ? "Nothing needed changing — your plan still fits."
+            ? "Nothing needed changing. Your plan still fits."
             : "Your plan has been updated. Scroll down to see it."}
         </Alert>
       )}

@@ -1,4 +1,4 @@
-"""Adherence evaluation — the 'sense' and 'evaluate' halves of the agent loop.
+"""Adherence evaluation. The 'sense' and 'evaluate' halves of the agent loop.
 
 This module answers "how is the user actually doing?" in plain Python, from
 stored logs. The agent's decision is made from this evidence, so it must be
@@ -133,7 +133,7 @@ def _adherence_rate(logs: List[DailyLogInDB]) -> tuple[float, int]:
     """Fraction of logged meals that were eaten, and the sample size behind it.
 
     Only counts meals the user actually logged. A day they never opened the app
-    is missing data, not a failure — treating silence as non-adherence would
+    is missing data, not a failure. Treating silence as non-adherence would
     make the agent panic every time someone goes on holiday.
 
     The sample size is returned alongside the rate because the rate alone is

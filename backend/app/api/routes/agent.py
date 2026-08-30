@@ -52,7 +52,7 @@ async def run(
 ) -> AgentRunResponse:
     """Run the agent loop once, blocking until it finishes.
 
-    Prefer `/agent/stream` in the UI — this exists for scripting and testing.
+    Prefer `/agent/stream` in the UI. This exists for scripting and testing.
     """
     _require_llm()
 
@@ -114,7 +114,7 @@ async def stream(
 async def list_events(
     user: CurrentUser, limit: int = Query(default=30, ge=1, le=100)
 ) -> List[AgentEventInDB]:
-    """The agent's decision timeline — every run, including the no-ops.
+    """The agent's decision timeline. Every run, including the no-ops.
 
     Recording decisions that changed nothing is deliberate: it's the difference
     between "the agent checked and you're fine" and "the agent never ran".

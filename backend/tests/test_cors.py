@@ -6,7 +6,7 @@ missing, the dashboard shows a value that looks right, and an exact-string
 comparison rejects it anyway. A trailing slash is enough.
 
 Nothing corrected here is a matter of taste. A browser's `Origin` header is
-scheme://host[:port], lowercase, with no path — always. So an allow list entry
+scheme://host[:port], lowercase, with no path. Always. So an allow list entry
 that ends in a slash, carries quotes, or is uppercase is a typo that can never
 match anything, and it is fixed rather than left to fail at 3am.
 """
@@ -42,8 +42,8 @@ class TestOriginsAreNormalised:
         assert normalise_origin("http://localhost:3000/") == "http://localhost:3000"
 
     def test_an_explicit_http_is_not_upgraded(self):
-        """Only a *missing* scheme is filled in. http:// is a deliberate choice —
-        local development runs on it."""
+        """Only a *missing* scheme is filled in. http:// is a deliberate choice.
+        Local development runs on it."""
         assert normalise_origin("http://localhost:3000") == "http://localhost:3000"
 
 

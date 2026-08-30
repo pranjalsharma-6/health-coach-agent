@@ -1,7 +1,7 @@
 """How the agent behaves when the model provider says no.
 
-The run timeline used to show `Meal drafting failed: NotFoundError` — the
-exception's class name with its message discarded — and then retry three times.
+The run timeline used to show `Meal drafting failed: NotFoundError`. The
+exception's class name with its message discarded, and then retry three times.
 A 404 for a retired model fails identically every attempt, so those retries
 bought nothing but the user's time, and the one fact that would have explained
 it (which model, and what to do) was never displayed.
@@ -57,7 +57,7 @@ class TestClassification:
         assert describe_llm_failure(ProviderError("upstream", 503)).retryable
 
     def test_a_parse_failure_keeps_the_message(self):
-        """No status code — a timeout or unparseable output. Worth retrying,
+        """No status code. A timeout or unparseable output. Worth retrying,
         and the message is the only clue about which."""
         failure = describe_llm_failure(ValueError("expected an object"))
         assert failure.retryable is True
@@ -120,7 +120,7 @@ class TestNonRetryableFailures:
         """The regression this file exists for.
 
         `plan_meals` and `plan_training` share a superstep. A retired model
-        breaks both, so both write to `error` concurrently — which a plain
+        breaks both, so both write to `error` concurrently, which a plain
         LastValue channel rejects with LangGraph's `InvalidUpdateError`,
         replacing the real diagnosis with a framework complaint about
         concurrent writes. It also fired whenever no API key was configured.
@@ -151,7 +151,7 @@ class TestNonRetryableFailures:
         expected = graph.meal_chunk_count() + 1  # meal chunks + the trainer
         assert len(calls) == expected, (
             f"expected one attempt from each specialist, got {len(calls)} calls "
-            "— a config error is being retried"
+            "a config error is being retried"
         )
 
     async def test_the_reason_reaches_the_run_timeline(self, wired, monkeypatch):
@@ -174,7 +174,7 @@ class TestNonRetryableFailures:
 
         model = resolve_model(resolve_provider() or "groq")
         assert model.lower() in messages.lower(), (
-            "the resolved model should be named — LLM_MODEL is blank when a "
+            "the resolved model should be named. LLM_MODEL is blank when a "
             "provider default is in use, and naming '' helps nobody"
         )
         assert "NotFoundError" not in messages, (
@@ -184,7 +184,7 @@ class TestNonRetryableFailures:
 
 class TestRetryableFailuresStillRetry:
     async def test_an_unparseable_response_is_retried(self, wired, monkeypatch):
-        """The retry budget still exists — it just isn't spent on config."""
+        """The retry budget still exists. It just isn't spent on config."""
         calls: list = []
         monkeypatch.setattr(
             graph, "get_structured_llm", always_raising(ValueError("bad json"), calls)
@@ -199,7 +199,7 @@ class TestRetryableFailuresStillRetry:
         assert meal_attempts == graph.MAX_GENERATION_ATTEMPTS
 
     async def test_a_transient_failure_can_recover(self, wired, monkeypatch):
-        """First call fails, second succeeds — the plan should still ship."""
+        """First call fails, second succeeds. The plan should still ship."""
         from app.models.plan import MealPlanDraft, PlanCritique, TrainingPlanDraft
         from tests.factories import (
             make_critique,
@@ -275,7 +275,7 @@ REAL_GROQ_LIST = [
 class TestRecommendation:
     """The tool recommended a 7B Arabic model over a 120B general one.
 
-    Not because of any judgement about capability — it took the first entry of
+    Not because of any judgement about capability. It took the first entry of
     an alphabetically sorted list, and "allam" sorts before "openai". Following
     that advice produces three failed generation attempts and an error message
     that blames the plan.
@@ -294,8 +294,8 @@ class TestRecommendation:
         assert self._candidates()[0] != "allam-2-7b"
 
     def test_speech_models_are_excluded(self):
-        """`orpheus` carries none of the usual giveaways — no "tts", no
-        "whisper" — so it was offered as a candidate for meal planning."""
+        """`orpheus` carries none of the usual giveaways. No "tts", no
+        "whisper", so it was offered as a candidate for meal planning."""
         candidates = self._candidates()
         assert not [c for c in candidates if "orpheus" in c]
 
@@ -334,7 +334,7 @@ class TestOutputBudgets:
     FREE_TIER_TPM = 8000
 
     # Measured from the real builders against a profile with allergies,
-    # dislikes and three cuisines — the largest prompt a real user produces.
+    # dislikes and three cuisines. The largest prompt a real user produces.
     # The trainer's grew when it started carrying the exercise list.
     NUTRITIONIST_PROMPT = 1000
     TRAINER_PROMPT = 700
@@ -343,7 +343,7 @@ class TestOutputBudgets:
         """Everything in one superstep shares a rate-limit window.
 
         Both specialists run together, and the nutritionist is itself several
-        concurrent chunk calls — each reserving the meal budget and each
+        concurrent chunk calls. Each reserving the meal budget and each
         carrying a full copy of the prompt. Counting one meal call here is what
         let two chunks reserve 8800 tokens against an 8000 limit.
         """
@@ -359,7 +359,7 @@ class TestOutputBudgets:
         )
         assert total <= self.FREE_TIER_TPM, (
             f"the fan-out reserves {total} tokens against a {self.FREE_TIER_TPM} "
-            "limit — every run will fail with 413"
+            "limit. Every run will fail with 413"
         )
 
     def test_no_single_budget_exceeds_the_limit_alone(self):
@@ -400,7 +400,7 @@ class TestOutputBudgets:
         assert budget_for(PlanCritique) < 1500
 
     def test_the_client_is_cached_per_budget(self, monkeypatch):
-        """One client per distinct budget, not one per call — the budget is a
+        """One client per distinct budget, not one per call. The budget is a
         constructor argument, so a single cached client cannot serve both."""
         import app.agent.llm as llm_module
 
@@ -441,7 +441,7 @@ class TestRequestTooLarge:
         """It used to say "try LLM_MAX_TOKENS=1500".
 
         That number is below what a plan needs to finish, so following the
-        advice turned a loud 413 into a plan silently cut off mid-week — the
+        advice turned a loud 413 into a plan silently cut off mid-week. The
         harder failure to recognise, reached by doing what the error said. The
         honest fix for a request that is too large is to ask for less plan.
         """
@@ -457,7 +457,7 @@ class TestToolUseFailed:
     Groq reports it as a 400, and treating every 400 as a client error meant
     the agent gave up after one attempt on exactly the transient failure the
     retry budget exists for. The observed case had an empty `failed_generation`
-    — the model produced nothing at all.
+   . The model produced nothing at all.
     """
 
     @staticmethod
@@ -473,7 +473,7 @@ class TestToolUseFailed:
         assert describe_llm_failure(self._tool_use_failed()).retryable is True
 
     def test_it_does_not_repeat_advice_the_user_has_already_taken(self):
-        """It used to say "set LLM_REASONING_EFFORT=low" — to a user who had.
+        """It used to say "set LLM_REASONING_EFFORT=low". To a user who had.
 
         The budget now carries its own room to think, so that setting is no
         longer the fix. Telling someone to do what they have already done makes
@@ -489,7 +489,7 @@ class TestToolUseFailed:
         )
 
     def test_a_genuinely_malformed_request_is_still_not_retried(self):
-        """Not every 400 is worth another attempt — the distinction is the
+        """Not every 400 is worth another attempt. The distinction is the
         point of the change."""
         failure = describe_llm_failure(ProviderError("unsupported field 'x'", 400))
         assert failure.retryable is False
@@ -679,7 +679,7 @@ class TestJsonValidateFailed:
     In json_mode nothing constrains the output, so a long nested array is where
     a model drifts: the observed failure closed day 1 correctly and then wrote
     `,"day":2` straight into the array without opening a brace. Groq reports
-    that as a 400, which was classified non-retryable — so the run gave up
+    that as a 400, which was classified non-retryable, so the run gave up
     after a single attempt at a failure that is different every time.
     """
 
@@ -725,7 +725,7 @@ class TestTrainerOutputSize:
     The trainer's JSON started drifting once each day carried a list of
     exercises. `cue` was the worst offender: filled from the exercise table
     during assembly anyway, so asking for it produced ~35 `"cue": null` per
-    week — output that had to be emitted correctly for no benefit, in exactly
+    week. Output that had to be emitted correctly for no benefit, in exactly
     the place the drift happened.
     """
 
@@ -751,7 +751,7 @@ class TestTrainerOutputSize:
         from app.models.plan import ActivityDraft, ExerciseDraft
 
         draft = ActivityDraft(
-            activity_type="Strength training — full body",
+            activity_type="Strength training. Full body",
             duration_minutes=45,
             intensity="moderate",
             description="Compound work.",
@@ -768,7 +768,7 @@ class TestRateLimitWaiting:
     """Being rate limited is not a failure of the plan.
 
     A 7-day plan costs most of an 8000 TPM window on its first attempt, so an
-    immediate retry is guaranteed to be refused — the observed run spent
+    immediate retry is guaranteed to be refused. The observed run spent
     attempts 2 and 3 on nothing but 429s. Waiting for the window to roll keeps
     the generation budget for problems that are actually about the food.
     """
@@ -1015,7 +1015,7 @@ class TestDailyVersusPerMinuteLimits:
         assert "PLAN_DURATION_DAYS" in message
 
     def test_the_provider_s_own_estimate_is_quoted(self):
-        """Nine minutes, from the error text — not a number we invented."""
+        """Nine minutes, from the error text, not a number we invented."""
         message = describe_llm_failure(self._limited(self.DAILY)).message
 
         assert "9 minutes" in message
@@ -1065,7 +1065,7 @@ class TestDailyVersusPerMinuteLimits:
         assert slept == [24.9]
 
     def test_an_uncapped_read_is_available_for_reporting(self):
-        """The wait is capped for *waiting* — telling the user it is nine
+        """The wait is capped for *waiting*. Telling the user it is nine
         minutes should not report ninety seconds."""
         from app.agent.llm import parse_retry_after_seconds
 
@@ -1275,7 +1275,7 @@ class TestGeminiStructuredOutput:
     """`method="json_mode"` is an OpenAI-style option Gemini does not have.
 
     Its `with_structured_output` takes **kwargs and drops unknown ones, so the
-    setting was accepted and ignored — while the adapter still appended a full
+    setting was accepted and ignored, while the adapter still appended a full
     JSON Schema to the prompt. Gemini then had its own function-calling path
     *and* a schema dump telling it to return raw JSON. The reply could not be
     coerced, LangChain's parser returned None, and the None travelled until
@@ -1351,7 +1351,7 @@ class TestGeminiStructuredOutput:
 class TestNeverNone:
     """A structured parser that returns None must not be allowed to travel.
 
-    LangChain returns None when it cannot coerce a response — no exception, no
+    LangChain returns None when it cannot coerce a response. No exception, no
     message. The observed traceback pointed at `draft.days` in the graph, four
     frames and one file away from the model call that produced nothing.
     """
@@ -1384,7 +1384,7 @@ class TestNeverNone:
 
     def test_the_failure_is_retryable(self):
         """An unparseable reply is the transient case the retry budget exists
-        for — unlike a retired model or a bad key."""
+        for. Unlike a retired model or a bad key."""
         assert describe_llm_failure(ValueError("returned nothing usable")).retryable
 
 
@@ -1393,7 +1393,7 @@ class TestProviderExceptionShapes:
 
     Groq and OpenAI raise exceptions with `status_code`. Google's `api_core`
     exceptions carry `code`. A classifier that only knew `status_code` was
-    blind to every Gemini rate limit — the run retried instantly three times,
+    blind to every Gemini rate limit. The run retried instantly three times,
     with no wait and a generic message, because the 429 was never recognised
     as a 429.
     """
@@ -1440,7 +1440,7 @@ class TestProviderExceptionShapes:
 
     def test_googles_quota_error_is_classified_and_waited_on(self):
         """It names a daily quota *and* a 31-second wait. The wait is what
-        matters — refusing to wait throws away a run half a minute from
+        matters. Refusing to wait throws away a run half a minute from
         working."""
         failure = describe_llm_failure(self.GoogleStyle(self.GOOGLE_QUOTA))
 
