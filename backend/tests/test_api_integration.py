@@ -394,6 +394,97 @@ class TestLogging:
         assert body["agent_recommended"] is True
         assert body["agent_reason"]
 
+    async def test_eating_something_else_is_logged_as_what_was_eaten(
+        self, client, monkeypatch
+    ):
+        """The most common thing a real person does with a meal plan.
+
+        Every path for this existed in the API from the start and nothing in
+        the interface could reach it: the buttons offered "ate it" and
+        "skipped", so eating a canteen thali instead of the planned dal had to
+        be recorded as one lie or the other. The status, the name and the
+        actual macros all round-trip.
+        """
+        token = await register(client)
+        await client.post(f"{BASE}/profile", json=PROFILE_PAYLOAD, headers=auth(token))
+
+        targets_response = await client.get(
+            f"{BASE}/profile/targets", headers=auth(token)
+        )
+        targets = make_targets(
+            calories=targets_response.json()["targets"]["calories_kcal"],
+            protein=targets_response.json()["targets"]["protein_g"],
+        )
+        _stub_llm(monkeypatch, make_health_plan(targets))
+        await client.post(f"{BASE}/agent/run", headers=auth(token))
+
+        response = await client.post(
+            f"{BASE}/logs/meals",
+            json={
+                "meal_id": "d1-breakfast",
+                "status": "substituted",
+                "substitute_name": "Chole bhature at the canteen",
+                "actual_calories_kcal": 780,
+                "actual_protein_g": 18,
+            },
+            headers=auth(token),
+        )
+        assert response.status_code == 200, response.text
+
+        body = response.json()
+        entry = next(
+            meal for meal in body["log"]["meals"] if meal["meal_id"] == "d1-breakfast"
+        )
+        assert entry["status"] == "substituted"
+        assert entry["substitute_name"] == "Chole bhature at the canteen"
+        assert entry["actual_calories_kcal"] == 780
+
+        # A swap is a meal eaten, not a meal missed. Counting it as a skip
+        # would make the agent restructure a plan the user is actually
+        # following.
+        assert body["snapshot"]["meals_eaten"] == 1
+        assert body["snapshot"]["meals_skipped"] == 0
+        assert body["snapshot"]["calories_consumed"] == 780
+
+    async def test_a_swap_with_no_numbers_falls_back_to_the_planned_meal(
+        self, client, monkeypatch
+    ):
+        """Most people know they had chole bhature and not what was in it.
+
+        Demanding a number they would have to invent is how a log stops being
+        used, so the fields are optional and the planned meal's figures stand
+        in. An honest approximation beats a fabricated precise one, and beats
+        recording nothing at all.
+        """
+        token = await register(client)
+        await client.post(f"{BASE}/profile", json=PROFILE_PAYLOAD, headers=auth(token))
+
+        targets_response = await client.get(
+            f"{BASE}/profile/targets", headers=auth(token)
+        )
+        targets = make_targets(
+            calories=targets_response.json()["targets"]["calories_kcal"],
+            protein=targets_response.json()["targets"]["protein_g"],
+        )
+        plan = make_health_plan(targets)
+        _stub_llm(monkeypatch, plan)
+        await client.post(f"{BASE}/agent/run", headers=auth(token))
+
+        planned_kcal = plan.daily_plans[0].meals[0].calories_kcal
+
+        response = await client.post(
+            f"{BASE}/logs/meals",
+            json={
+                "meal_id": "d1-breakfast",
+                "status": "substituted",
+                "substitute_name": "Whatever the mess was serving",
+            },
+            headers=auth(token),
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["snapshot"]["calories_consumed"] == planned_kcal
+
     async def test_relogging_a_meal_corrects_rather_than_duplicates(
         self, client, monkeypatch
     ):

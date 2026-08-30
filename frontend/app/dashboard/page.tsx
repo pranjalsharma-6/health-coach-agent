@@ -33,6 +33,7 @@ import type {
   AgentEvent,
   DailyLog,
   MealStatus,
+  MealSwap,
   Plan,
   Profile,
   TargetsResponse,
@@ -171,9 +172,15 @@ export default function DashboardPage() {
   }, [log]);
 
   const handleLogMeal = useCallback(
-    async (mealId: string, status: MealStatus) => {
+    async (mealId: string, status: MealStatus, swap?: MealSwap) => {
       try {
-        const result = await api.logs.logMeal({ meal_id: mealId, status });
+        const result = await api.logs.logMeal({
+          meal_id: mealId,
+          status,
+          substitute_name: swap?.name ?? null,
+          actual_calories_kcal: swap?.calories ?? null,
+          actual_protein_g: swap?.protein ?? null,
+        });
         setLog(result.log);
         setSnapshot(result.snapshot);
         setAgentPrompt(result.agent_recommended ? result.agent_reason : null);

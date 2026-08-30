@@ -42,6 +42,21 @@ export type BudgetTier = "low" | "medium" | "high";
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 export type MealStatus = "planned" | "eaten" | "skipped" | "substituted";
 
+/**
+ * What someone ate instead of the planned meal.
+ *
+ * Calories and protein are optional on purpose. Most people know they had
+ * chole bhature and have no idea what was in it, and demanding a number they
+ * would have to invent is how a log stops being used. When they are missing,
+ * adherence falls back to the planned meal's figures, which is a better guess
+ * than nothing and an honest one.
+ */
+export interface MealSwap {
+  name: string;
+  calories?: number;
+  protein?: number;
+}
+
 export type AgentDecision =
   | "no_action"
   | "rebalance_day"

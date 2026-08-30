@@ -2,15 +2,25 @@
 
 import { useState } from "react";
 
-import { Badge, Button, Spinner, cn } from "@/components/ui";
+import { Badge, Button, Field, Input, Spinner, cn } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import { MEAL_EMOJI, MEAL_LABELS } from "@/lib/labels";
-import type { MacroCheck, Meal, MealStatus, Recipe } from "@/lib/types";
+import type {
+  MacroCheck,
+  Meal,
+  MealStatus,
+  MealSwap,
+  Recipe,
+} from "@/lib/types";
 
 interface Props {
   meal: Meal;
   status: MealStatus;
-  onLog: (mealId: string, status: MealStatus) => Promise<void>;
+  onLog: (
+    mealId: string,
+    status: MealStatus,
+    swap?: MealSwap,
+  ) => Promise<void>;
   /** Logging is only meaningful for the day the user is actually living. */
   loggable: boolean;
 }
@@ -22,14 +32,44 @@ export function MealCard({ meal, status, onLog, loggable }: Props) {
   const [recipeOpen, setRecipeOpen] = useState(false);
   const [recipeLoading, setRecipeLoading] = useState(false);
   const [recipeError, setRecipeError] = useState<string | null>(null);
+  const [swapOpen, setSwapOpen] = useState(false);
+  const [swapName, setSwapName] = useState("");
+  const [swapCalories, setSwapCalories] = useState("");
+  const [swapProtein, setSwapProtein] = useState("");
 
-  async function handleLog(next: MealStatus) {
+  async function handleLog(next: MealStatus, swap?: MealSwap) {
     setLogging(next);
     try {
-      await onLog(meal.meal_id, next);
+      await onLog(meal.meal_id, next, swap);
     } finally {
       setLogging(null);
     }
+  }
+
+  async function handleSwap() {
+    const name = swapName.trim();
+    if (!name) return;
+
+    // Blank stays blank. An empty box means "I don't know", and sending 0
+    // would tell the agent the meal was free, which is worse than telling it
+    // nothing: it would then hand back calories the user never actually saved.
+    const asNumber = (raw: string) => {
+      const value = Number(raw.trim());
+      return raw.trim() && Number.isFinite(value) && value >= 0
+        ? Math.round(value)
+        : undefined;
+    };
+
+    await handleLog("substituted", {
+      name,
+      calories: asNumber(swapCalories),
+      protein: asNumber(swapProtein),
+    });
+
+    setSwapOpen(false);
+    setSwapName("");
+    setSwapCalories("");
+    setSwapProtein("");
   }
 
   async function toggleRecipe() {
@@ -136,12 +176,81 @@ export function MealCard({ meal, status, onLog, loggable }: Props) {
               >
                 Skipped
               </Button>
+              <Button
+                size="sm"
+                variant={status === "substituted" ? "primary" : "secondary"}
+                onClick={() => setSwapOpen((open) => !open)}
+                aria-expanded={swapOpen}
+              >
+                Ate something else
+              </Button>
             </>
           )}
           <Button size="sm" variant="ghost" onClick={toggleRecipe}>
             {recipeOpen ? "Hide recipe" : "Recipe"}
           </Button>
         </div>
+
+        {swapOpen && loggable && (
+          <div className="mt-4 rounded-lg border border-line bg-raised p-4 space-y-3 animate-fade-up">
+            <Field label="What did you eat?" htmlFor={`swap-name-${meal.meal_id}`}>
+              <Input
+                id={`swap-name-${meal.meal_id}`}
+                value={swapName}
+                onChange={(event) => setSwapName(event.target.value)}
+                placeholder="Chole bhature at the canteen"
+                maxLength={200}
+              />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Calories" htmlFor={`swap-kcal-${meal.meal_id}`}>
+                <Input
+                  id={`swap-kcal-${meal.meal_id}`}
+                  value={swapCalories}
+                  onChange={(event) => setSwapCalories(event.target.value)}
+                  inputMode="numeric"
+                  placeholder={String(meal.calories_kcal)}
+                  className="tabular-nums"
+                />
+              </Field>
+              <Field label="Protein (g)" htmlFor={`swap-protein-${meal.meal_id}`}>
+                <Input
+                  id={`swap-protein-${meal.meal_id}`}
+                  value={swapProtein}
+                  onChange={(event) => setSwapProtein(event.target.value)}
+                  inputMode="numeric"
+                  placeholder={String(meal.protein_g)}
+                  className="tabular-nums"
+                />
+              </Field>
+            </div>
+
+            <p className="text-xs text-ink-muted">
+              Leave the numbers blank if you don&apos;t know them. Kaya will
+              assume the planned meal&apos;s figures, which is closer than
+              pretending you ate nothing.
+            </p>
+
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                loading={logging === "substituted"}
+                disabled={!swapName.trim()}
+                onClick={handleSwap}
+              >
+                Log it
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setSwapOpen(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {recipeOpen && (
