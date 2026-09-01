@@ -6,11 +6,11 @@ arithmetic. Calorie and macro targets arrive pre-computed from
 explaining itself, not deciding what the numbers should be.
 """
 
-from typing import List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from app.models.enums import AgentDecision, Cuisine, DietType, Goal, MealType
 from app.models.log import AdherenceSnapshot
-from app.models.plan import HealthPlan, NutritionTargets, PlanInDB
+from app.models.plan import HealthPlan, MealItem, NutritionTargets, PlanInDB
 from app.models.profile import ProfileInDB
 from app.services.ingredients import protein_reference_block
 
@@ -505,6 +505,46 @@ calorie day. Move the session to day 5" is useful. "Could be better balanced" \
 is not."""
 
 
+def build_today_block(
+    planned_meals: Sequence[MealItem],
+    statuses: Dict[str, str],
+) -> str:
+    """Meal by meal, what has already happened today.
+
+    The rebalance instruction says to keep what was eaten and redistribute into
+    what is still ahead. Without this block that instruction cannot be followed:
+    the model was told only that one meal was eaten and two are pending, never
+    which ones. It was rewriting the day blind and being asked to preserve
+    something it could not see.
+    """
+    if not planned_meals:
+        return ""
+
+    lines = ["## TODAY SO FAR", ""]
+    for meal in planned_meals:
+        meal_type = getattr(meal.meal_type, "value", meal.meal_type)
+        status = statuses.get(meal.meal_id, "planned")
+        mark = {
+            "eaten": "ALREADY EATEN. Keep this meal exactly as it is",
+            "substituted": "ATE SOMETHING ELSE. Keep this slot as it is",
+            "skipped": "SKIPPED. Its calories and protein need absorbing elsewhere",
+        }.get(status, "STILL TO COME. This one you may change")
+        lines.append(
+            f"- **{meal_type}**: {meal.name} "
+            f"({meal.calories_kcal} kcal, {meal.protein_g}g protein). {mark}."
+        )
+
+    lines.extend(
+        [
+            "",
+            "Reproduce every ALREADY EATEN meal with the same name and the same "
+            "numbers. They have happened and cannot be replanned. Change only "
+            "the meals marked STILL TO COME.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def build_nutritionist_prompt(
     profile: ProfileInDB,
     targets: NutritionTargets,
@@ -513,6 +553,7 @@ def build_nutritionist_prompt(
     current_plan: Optional[PlanInDB] = None,
     trigger_detail: str = "",
     duration_days: int = 7,
+    today_block: str = "",
 ) -> str:
     """The food half of the plan."""
     sections = [
@@ -526,6 +567,9 @@ def build_nutritionist_prompt(
 
     if snapshot is not None:
         sections.extend([_build_evidence_block(snapshot), ""])
+
+    if today_block:
+        sections.extend([today_block, ""])
 
     sections.append(
         _build_task_block(

@@ -252,7 +252,7 @@ class TestConfigurablePlanLength:
 
     def test_the_stored_plan_records_its_own_length(self):
         """A plan generated under one setting must keep working if the setting
-        changes. `_resolve_plan_day` counts against the plan, not the config."""
+        changes. `resolve_plan_day` counts against the plan, not the config."""
         from tests.factories import make_health_plan, make_targets
 
         plan = make_health_plan(make_targets(), days=4)

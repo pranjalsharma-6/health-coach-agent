@@ -64,6 +64,7 @@ from app.agent.prompts import (
     build_critique_feedback,
     build_non_negotiables,
     build_nutritionist_prompt,
+    build_today_block,
     build_recipe_correction,
     build_recipe_prompt,
     build_trainer_prompt,
@@ -101,6 +102,7 @@ from app.services.adherence import (
     STRUCTURAL_ADHERENCE_THRESHOLD,
     build_snapshot,
     describe_snapshot,
+    resolve_plan_day,
 )
 from app.services.ingredients import RecipeAnalysis, analyse_recipe
 from app.services.nutrition import calculate_targets
@@ -406,6 +408,29 @@ async def _draft_meals_in_chunks(
     )
 
 
+def _today_so_far(state: AgentState) -> str:
+    """Meal by meal, what has already happened, for the prompt.
+
+    Only worth building when there is a plan to compare against and something
+    logged. On a first run there is no "so far", and a block saying every meal
+    is still to come is noise the model has to read past.
+    """
+    active_plan: Optional[PlanInDB] = state.get("active_plan")
+    today_log = state.get("today_log")
+    if active_plan is None or today_log is None or not today_log.meals:
+        return ""
+
+    day = resolve_plan_day(active_plan, state["today"])
+    if day is None:
+        return ""
+
+    statuses = {
+        entry.meal_id: getattr(entry.status, "value", entry.status)
+        for entry in today_log.meals
+    }
+    return build_today_block(day.meals, statuses)
+
+
 async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
     """The nutritionist: the food half of the week."""
     if state.get("error"):
@@ -427,6 +452,7 @@ async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
         current_plan=state.get("active_plan"),
         trigger_detail=state.get("trigger_detail", ""),
         duration_days=PLAN_DURATION_DAYS,
+        today_block=_today_so_far(state),
     )
     feedback = [
         extra
@@ -585,6 +611,67 @@ def _fill_in_form_cues(activity: ActivityItem) -> None:
             exercise.cue = cue_for(exercise.name)
 
 
+def _meals(count: int) -> str:
+    return "1 meal" if count == 1 else f"{count} meals"
+
+
+def _carry_over_what_already_happened(
+    plan: HealthPlan, state: AgentState
+) -> List[str]:
+    """Put back the meals the user already ate, verbatim, and say which.
+
+    Two problems, one cause. The rebalance prompt asks the model to preserve
+    meals that have already happened, which is a request it can decline, get
+    wrong, or paraphrase into a different dish with the same name.
+
+    And because meal ids are deterministic (`d1-breakfast` is `d1-breakfast` in
+    every version of every plan) while the day's log matches on id alone, a
+    replanned breakfast inherits the status of the one it replaced. Eat
+    breakfast, skip lunch, press the button, and a completely different
+    breakfast comes back marked "Eaten" with its calories counted.
+
+    Copying the eaten meals across in code fixes both at once: the instruction
+    no longer has to be obeyed, and the status is correct because the meal it
+    points at really is the one that was eaten.
+
+    Only today, and only meals that were actually logged. Everything still
+    ahead of the user is the model's to change, which is the entire point of a
+    rebalance.
+    """
+    active_plan: Optional[PlanInDB] = state.get("active_plan")
+    today_log = state.get("today_log")
+    if active_plan is None or today_log is None or not plan.daily_plans:
+        return []
+
+    settled = {
+        entry.meal_id
+        for entry in today_log.meals
+        if entry.status in ("eaten", "substituted")
+    }
+    if not settled:
+        return []
+
+    previously = resolve_plan_day(active_plan, state["today"])
+    if previously is None:
+        return []
+
+    was = {meal.meal_id: meal for meal in previously.meals}
+
+    # A new plan starts today, so its first day is the one being lived.
+    today_in_new_plan = plan.daily_plans[0]
+    kept: List[str] = []
+
+    for index, meal in enumerate(today_in_new_plan.meals):
+        original = was.get(meal.meal_id)
+        if meal.meal_id in settled and original is not None:
+            today_in_new_plan.meals[index] = original.model_copy(deep=True)
+            kept.append(meal.meal_id)
+
+    if kept:
+        logger.info("Carried %d already-eaten meal(s) into the new plan", len(kept))
+    return kept
+
+
 async def assemble_node(state: AgentState) -> Dict[str, Any]:
     """Zip the two halves into one plan."""
     if state.get("error"):
@@ -640,8 +727,12 @@ async def assemble_node(state: AgentState) -> Dict[str, Any]:
         daily_plans=daily_plans,
     )
 
+    carried = _carry_over_what_already_happened(plan, state)
+
     uncovered = [d.day for d in meals.days if d.day not in by_day]
     message = f"Combined {len(daily_plans)} days of meals and training."
+    if carried:
+        message += f" Kept {_meals(len(carried))} you already had today."
     if uncovered:
         message += f" Days {uncovered} had no session, set to rest."
 

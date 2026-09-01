@@ -30,7 +30,7 @@ def build_snapshot(
     recent_logs: List[DailyLogInDB],
 ) -> AdherenceSnapshot:
     """Compute the day's adherence picture."""
-    plan_day = _resolve_plan_day(plan, target_date)
+    plan_day = resolve_plan_day(plan, target_date)
     planned_meals = plan_day.meals if plan_day else []
     plan_day_number = plan_day.day if plan_day else None
 
@@ -105,7 +105,7 @@ def build_snapshot(
     )
 
 
-def _resolve_plan_day(plan: Optional[PlanInDB], target_date: date):
+def resolve_plan_day(plan: Optional[PlanInDB], target_date: date):
     """Map a calendar date onto the right day of the plan.
 
     Plans are relative ('day 3'), not absolute, so we count days elapsed since
