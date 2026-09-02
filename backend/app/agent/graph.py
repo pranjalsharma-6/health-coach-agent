@@ -615,6 +615,24 @@ def _meals(count: int) -> str:
     return "1 meal" if count == 1 else f"{count} meals"
 
 
+def _skipped_today(state: AgentState) -> List[str]:
+    """Meals the user has already skipped today.
+
+    They stay in the plan so the day keeps its shape and the log entry keeps
+    pointing at the meal it was recorded against. They contribute nothing to
+    what actually gets eaten, which is what makes room for the rest of the day
+    to grow.
+    """
+    today_log = state.get("today_log")
+    if today_log is None:
+        return []
+    return [
+        entry.meal_id
+        for entry in today_log.meals
+        if getattr(entry.status, "value", entry.status) == "skipped"
+    ]
+
+
 def _carry_over_what_already_happened(
     plan: HealthPlan, state: AgentState
 ) -> List[str]:
@@ -644,9 +662,10 @@ def _carry_over_what_already_happened(
         return []
 
     settled = {
-        entry.meal_id
+        entry.meal_id: getattr(entry.status, "value", entry.status)
         for entry in today_log.meals
-        if entry.status in ("eaten", "substituted")
+        if getattr(entry.status, "value", entry.status)
+        in ("eaten", "substituted", "skipped")
     }
     if not settled:
         return []
@@ -668,7 +687,7 @@ def _carry_over_what_already_happened(
             kept.append(meal.meal_id)
 
     if kept:
-        logger.info("Carried %d already-eaten meal(s) into the new plan", len(kept))
+        logger.info("Carried %d settled meal(s) into the new plan", len(kept))
     return kept
 
 
@@ -728,11 +747,18 @@ async def assemble_node(state: AgentState) -> Dict[str, Any]:
     )
 
     carried = _carry_over_what_already_happened(plan, state)
+    skipped_today = _skipped_today(state)
+    eaten = [meal_id for meal_id in carried if meal_id not in skipped_today]
 
     uncovered = [d.day for d in meals.days if d.day not in by_day]
     message = f"Combined {len(daily_plans)} days of meals and training."
-    if carried:
-        message += f" Kept {_meals(len(carried))} you already had today."
+    if eaten:
+        message += f" Kept {_meals(len(eaten))} you already had today."
+    if skipped_today:
+        message += (
+            f" {_meals(len(skipped_today)).capitalize()} you skipped stays "
+            "skipped, and the rest of the day absorbs it."
+        )
     if uncovered:
         message += f" Days {uncovered} had no session, set to rest."
 
@@ -827,7 +853,11 @@ async def validate_node(state: AgentState) -> Dict[str, Any]:
         return {}
 
     result = validate_plan(
-        plan, state["profile"], state["targets"], expected_days=PLAN_DURATION_DAYS
+        plan,
+        state["profile"],
+        state["targets"],
+        expected_days=PLAN_DURATION_DAYS,
+        skipped_today=set(_skipped_today(state)),
     )
 
     if result.is_valid:

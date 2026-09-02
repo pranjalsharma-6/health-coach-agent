@@ -162,7 +162,9 @@ class TestTheDeltaIsAlwaysActionable:
         class _Day:
             def __init__(self, inner):
                 self.day = 1
-                self.meals = inner.meals
+                # Widen to stored meals: the check now reads `meal_id` so it can
+                # leave out anything the user already skipped.
+                self.meals = inner.to_meal_items()
 
         _check_day_totals(_Day(day), targets, result)
 

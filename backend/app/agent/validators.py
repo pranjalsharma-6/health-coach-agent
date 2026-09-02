@@ -12,7 +12,7 @@ regeneration; warnings are recorded but tolerated.
 import re
 from dataclasses import dataclass, field
 from math import ceil
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from app.core.logging import get_logger
 from app.models.enums import DietType
@@ -65,9 +65,23 @@ def validate_plan(
     profile: ProfileInDB,
     targets: NutritionTargets,
     expected_days: Optional[int] = None,
+    skipped_today: Optional[Set[str]] = None,
 ) -> ValidationResult:
-    """Run every check against a generated plan."""
+    """Run every check against a generated plan.
+
+    `skipped_today` names meals the user has already skipped. They stay in the
+    plan, because the day keeps its shape and the log entry has to keep
+    pointing at the meal it was recorded against, but they contribute nothing
+    to what the user will actually eat.
+
+    Without this the day's arithmetic makes a rebalance impossible. Every day
+    has to total the full target across every meal, so a skipped lunch is
+    regenerated at full size and there is no room left for dinner to grow into.
+    The plan would be rewritten and come back looking identical, which is
+    exactly what it did.
+    """
     result = ValidationResult()
+    skipped = skipped_today or set()
 
     _check_structure(plan, profile, result, expected_days)
     _check_diet_compliance(plan, profile, result)
@@ -75,7 +89,7 @@ def validate_plan(
 
     diet = DietType(profile.diet_type)
     for day in plan.daily_plans:
-        _check_day_totals(day, targets, result)
+        _check_day_totals(day, targets, result, skipped)
         _check_meal_plausibility(day, targets, diet, result)
         _check_training_session(day, profile, result)
 
@@ -222,10 +236,16 @@ def _check_allergens(
 # Nutrition accuracy
 # --------------------------------------------------------------------------- #
 def _check_day_totals(
-    day: DailyPlan, targets: NutritionTargets, result: ValidationResult
+    day: DailyPlan,
+    targets: NutritionTargets,
+    result: ValidationResult,
+    skipped: Optional[Set[str]] = None,
 ) -> None:
-    total_kcal = sum(m.calories_kcal for m in day.meals)
-    total_protein = sum(m.protein_g for m in day.meals)
+    skipped = skipped or set()
+    counted = [meal for meal in day.meals if meal.meal_id not in skipped]
+
+    total_kcal = sum(m.calories_kcal for m in counted)
+    total_protein = sum(m.protein_g for m in counted)
 
     kcal_low = targets.calories_kcal * (1 - CALORIE_TOLERANCE)
     kcal_high = targets.calories_kcal * (1 + CALORIE_TOLERANCE)
@@ -240,7 +260,7 @@ def _check_day_totals(
         # inferring arithmetic from a range.
         short = total_kcal < kcal_low
         gap = round(kcal_low - total_kcal) if short else round(total_kcal - kcal_high)
-        per_meal = round(gap / len(day.meals)) if day.meals else gap
+        per_meal = round(gap / len(counted)) if counted else gap
         word = "MORE" if short else "LESS"
 
         # A day two calories outside the range divides into "about 0 kcal more

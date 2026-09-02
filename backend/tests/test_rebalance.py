@@ -55,11 +55,19 @@ class TestThePromptKnowsWhatYouAte:
         assert "breakfast" in block
         assert "ALREADY EATEN" in block
 
-    def test_a_skipped_meal_is_marked_as_needing_absorbing(self):
+    def test_a_skipped_meal_is_marked_as_gone_rather_than_pending(self):
+        """It has happened. It is not a meal still ahead of the user."""
         block = self._block(lunch="skipped")
 
-        assert "SKIPPED" in block
-        assert "absorbing" in block
+        assert "SKIPPED AND GONE" in block
+        assert "does not count toward today" in block
+
+    def test_the_gap_is_stated_in_calories_and_shared_out(self):
+        """A number the model can act on beats an instruction to redistribute."""
+        block = self._block(breakfast="eaten", lunch="skipped")
+
+        assert "kcal larger each" in block
+        assert "not simply restate the same portions" in block
 
     def test_unlogged_meals_are_marked_changeable(self):
         """Otherwise a rebalance has nothing it is allowed to touch."""
@@ -115,14 +123,78 @@ class TestEatenMealsSurviveTheReplan:
         )
         assert now.calories_kcal == was.calories_kcal
 
-    def test_a_skipped_meal_is_left_for_the_model_to_rewrite(self):
-        """Rewriting the meals still ahead is the entire point of a rebalance."""
-        state, _old = self._state(a_log(lunch="skipped"))
+    def test_a_skipped_meal_is_also_kept(self):
+        """It stays in the plan, and stops counting toward the day.
+
+        The first version of this rewrote skipped meals, on the reasoning that
+        they were still ahead of the user. They are not: a skipped lunch is as
+        settled as an eaten breakfast. Regenerating it at full size is what
+        left no room for dinner to grow into, so a rebalance produced a plan
+        that looked identical to the one it replaced.
+        """
+        state, old = self._state(a_log(lunch="skipped"))
         new = self._new_plan()
 
         kept = graph._carry_over_what_already_happened(new, state)
 
-        assert kept == []
+        was = next(m for m in old.daily_plans[0].meals if m.meal_id == "d1-lunch")
+        now = next(m for m in new.daily_plans[0].meals if m.meal_id == "d1-lunch")
+
+        assert kept == ["d1-lunch"]
+        assert now.name == was.name
+
+    def test_the_pending_meals_are_still_the_models_to_rewrite(self):
+        """Only what has happened is fixed. The rest of the day is the point."""
+        state, _old = self._state(a_log(breakfast="eaten", lunch="skipped"))
+        new = self._new_plan()
+
+        graph._carry_over_what_already_happened(new, state)
+
+        untouched = [
+            meal.name
+            for meal in new.daily_plans[0].meals
+            if meal.meal_id in ("d1-dinner", "d1-snack")
+        ]
+        assert all("Something else" in name for name in untouched), (
+            "dinner and snack were overwritten, so nothing can absorb the skip"
+        )
+
+    def test_a_skipped_meal_stops_counting_toward_the_day(self):
+        """The arithmetic that made a real rebalance possible.
+
+        Every day has to total the calorie target. While a skipped meal still
+        counted, the day was already full and there was nowhere for the
+        remaining meals to grow.
+        """
+        from app.agent.validators import validate_plan
+        from tests.factories import make_health_plan, make_profile
+
+        targets = make_targets()
+        plan = make_health_plan(targets, days=4)
+        day_one = plan.daily_plans[0]
+
+        # Skip lunch, and let dinner take on most of what it was carrying.
+        lunch = next(m for m in day_one.meals if m.meal_id == "d1-lunch")
+        dinner = next(m for m in day_one.meals if m.meal_id == "d1-dinner")
+        dinner.calories_kcal += lunch.calories_kcal
+        dinner.protein_g += lunch.protein_g
+        dinner.carbs_g += lunch.carbs_g
+        dinner.fat_g += lunch.fat_g
+
+        profile = make_profile()
+
+        counting_it = validate_plan(plan, profile, targets)
+        leaving_it_out = validate_plan(
+            plan, profile, targets, skipped_today={"d1-lunch"}
+        )
+
+        assert any("kcal" in e for e in counting_it.errors), (
+            "with the skipped meal counted, a rebalanced day is over target and "
+            "gets rejected, which is the bug"
+        )
+        assert not any(
+            "Day 1" in e and "kcal" in e for e in leaving_it_out.errors
+        ), leaving_it_out.errors
 
     def test_a_substitution_counts_as_having_happened(self):
         state, _old = self._state(a_log(breakfast="substituted"))

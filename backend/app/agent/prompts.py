@@ -525,23 +525,50 @@ def build_today_block(
         meal_type = getattr(meal.meal_type, "value", meal.meal_type)
         status = statuses.get(meal.meal_id, "planned")
         mark = {
-            "eaten": "ALREADY EATEN. Keep this meal exactly as it is",
-            "substituted": "ATE SOMETHING ELSE. Keep this slot as it is",
-            "skipped": "SKIPPED. Its calories and protein need absorbing elsewhere",
-        }.get(status, "STILL TO COME. This one you may change")
+            "eaten": "ALREADY EATEN. Fixed, reproduce it exactly",
+            "substituted": "ATE SOMETHING ELSE. Fixed, reproduce this slot as it is",
+            "skipped": "SKIPPED AND GONE. Fixed, reproduce it, but it will "
+            "not be eaten and does not count toward today",
+        }.get(status, "STILL TO COME. Yours to change")
         lines.append(
             f"- **{meal_type}**: {meal.name} "
             f"({meal.calories_kcal} kcal, {meal.protein_g}g protein). {mark}."
         )
 
+    skipped = [
+        meal for meal in planned_meals if statuses.get(meal.meal_id) == "skipped"
+    ]
+    pending = [
+        meal
+        for meal in planned_meals
+        if statuses.get(meal.meal_id, "planned") == "planned"
+    ]
+
     lines.extend(
         [
             "",
-            "Reproduce every ALREADY EATEN meal with the same name and the same "
-            "numbers. They have happened and cannot be replanned. Change only "
-            "the meals marked STILL TO COME.",
+            "Every meal marked Fixed has already happened. Reproduce each one "
+            "with the same name and the same numbers. Only the meals marked "
+            "STILL TO COME are yours to change.",
         ]
     )
+
+    if skipped and pending:
+        missing = sum(meal.calories_kcal for meal in skipped)
+        protein = sum(meal.protein_g for meal in skipped)
+        share = round(missing / len(pending))
+        lines.extend(
+            [
+                "",
+                f"The skipped meals were carrying {missing} kcal and {protein}g "
+                f"of protein that the user has not had. Today's target is now "
+                f"met by the fixed meals plus the {len(pending)} still to come, "
+                f"so those need to be roughly {share} kcal larger each than "
+                "they were. Make them genuinely bigger: more rice, more oil, "
+                "nuts, paneer, curd. Do not simply restate the same portions.",
+            ]
+        )
+
     return "\n".join(lines)
 
 
