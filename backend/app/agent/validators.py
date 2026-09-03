@@ -38,6 +38,18 @@ SHORT_PLAN_TOLERANCE = 0.7
 CALORIE_TOLERANCE = 0.12   # ±12%
 PROTEIN_TOLERANCE = 0.15   # ±15%, and never more than 15% *under*
 
+# How much of a skipped meal the rest of the day is expected to take on.
+#
+# Not all of it. Asking two remaining meals to carry a whole missed lunch means
+# an 873 kcal snack, which nobody eats and which the model will not write. The
+# nutritionist's own brief says not to claw back the entire deficit in one
+# sitting, and a validator demanding exactly that made the two contradict each
+# other until no plan could pass.
+#
+# Half is the honest number. A day with a skipped meal genuinely lands under
+# target, and pretending otherwise is how a plan stops describing real life.
+SKIPPED_MEAL_ABSORPTION = 0.5
+
 # A single meal shouldn't dominate the day.
 MAX_SINGLE_MEAL_FRACTION = 0.55
 
@@ -243,12 +255,21 @@ def _check_day_totals(
 ) -> None:
     skipped = skipped or set()
     counted = [meal for meal in day.meals if meal.meal_id not in skipped]
+    missed = [meal for meal in day.meals if meal.meal_id in skipped]
 
     total_kcal = sum(m.calories_kcal for m in counted)
     total_protein = sum(m.protein_g for m in counted)
 
-    kcal_low = targets.calories_kcal * (1 - CALORIE_TOLERANCE)
-    kcal_high = targets.calories_kcal * (1 + CALORIE_TOLERANCE)
+    # What the rest of the day is actually being asked to reach. A skipped meal
+    # is partly absorbed and partly simply lost, so today's bar comes down.
+    forfeited = sum(m.calories_kcal for m in missed) * (1 - SKIPPED_MEAL_ABSORPTION)
+    day_target = targets.calories_kcal - forfeited
+    protein_target = targets.protein_g - sum(
+        m.protein_g for m in missed
+    ) * (1 - SKIPPED_MEAL_ABSORPTION)
+
+    kcal_low = day_target * (1 - CALORIE_TOLERANCE)
+    kcal_high = day_target * (1 + CALORIE_TOLERANCE)
 
     if not kcal_low <= total_kcal <= kcal_high:
         # Say which way and by how much, per meal.
@@ -275,17 +296,22 @@ def _check_day_totals(
             f"Day {day.day} totals {total_kcal} kcal, "
             f"{'short of' if short else 'over'} the acceptable range "
             f"{round(kcal_low)}-{round(kcal_high)} for a "
-            f"{targets.calories_kcal} kcal target. "
-            f"Day {day.day} needs {direction}. Bigger portions and more "
-            "calorie-dense ingredients, not more meals."
+            f"{round(day_target)} kcal target. "
+            f"Day {day.day} needs {direction}. "
+            + (
+                "Bigger portions and more calorie-dense ingredients, not more "
+                "meals."
+                if short
+                else "Smaller portions and lighter cooking, not fewer meals."
+            )
         )
 
     # Under-shooting protein is a real failure; overshooting it is fine.
-    protein_floor = targets.protein_g * (1 - PROTEIN_TOLERANCE)
+    protein_floor = protein_target * (1 - PROTEIN_TOLERANCE)
     if total_protein < protein_floor:
         result.errors.append(
             f"Day {day.day} provides only {total_protein}g protein, below the "
-            f"{round(protein_floor)}g minimum for a {targets.protein_g}g target."
+            f"{round(protein_floor)}g minimum for a {round(protein_target)}g target."
         )
 
 

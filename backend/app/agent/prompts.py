@@ -508,6 +508,7 @@ is not."""
 def build_today_block(
     planned_meals: Sequence[MealItem],
     statuses: Dict[str, str],
+    targets: Optional[NutritionTargets] = None,
 ) -> str:
     """Meal by meal, what has already happened today.
 
@@ -553,19 +554,41 @@ def build_today_block(
         ]
     )
 
-    if skipped and pending:
+    if skipped and pending and targets is not None:
+        from app.agent.validators import SKIPPED_MEAL_ABSORPTION
+
         missing = sum(meal.calories_kcal for meal in skipped)
-        protein = sum(meal.protein_g for meal in skipped)
-        share = round(missing / len(pending))
+        # Half a skipped meal is absorbed and half is simply lost, so today's
+        # bar is lower than a normal day's. Saying so stops the model splitting
+        # the difference between two instructions it cannot both satisfy.
+        day_target = round(
+            targets.calories_kcal - missing * (1 - SKIPPED_MEAL_ABSORPTION)
+        )
+        already = sum(
+            meal.calories_kcal
+            for meal in planned_meals
+            if statuses.get(meal.meal_id) in ("eaten", "substituted")
+        )
+        each = round(max(day_target - already, 0) / len(pending))
+
         lines.extend(
             [
                 "",
-                f"The skipped meals were carrying {missing} kcal and {protein}g "
-                f"of protein that the user has not had. Today's target is now "
-                f"met by the fixed meals plus the {len(pending)} still to come, "
-                f"so those need to be roughly {share} kcal larger each than "
-                "they were. Make them genuinely bigger: more rice, more oil, "
-                "nuts, paneer, curd. Do not simply restate the same portions.",
+                "### Today's arithmetic. This overrides the per-meal average above",
+                "",
+                f"A meal worth {missing} kcal was skipped. Today is therefore a "
+                f"**{day_target} kcal day**, not a {targets.calories_kcal} kcal "
+                "one: some of a missed meal is made up and some is simply gone. "
+                "Do not try to recover all of it.",
+                "",
+                f"Fixed meals already account for {already} kcal, so the "
+                f"{len(pending)} meal(s) still to come must total about "
+                f"{day_target - already} kcal, roughly **{each} kcal each**.",
+                "",
+                "That is substantially more than a normal portion and it is "
+                "meant to be. Make them genuinely larger: more rice or roti, "
+                "an extra spoon of oil or ghee, nuts, paneer, curd. Restating "
+                "the same portions will fail validation.",
             ]
         )
 

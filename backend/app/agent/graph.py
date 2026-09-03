@@ -428,7 +428,7 @@ def _today_so_far(state: AgentState) -> str:
         entry.meal_id: getattr(entry.status, "value", entry.status)
         for entry in today_log.meals
     }
-    return build_today_block(day.meals, statuses)
+    return build_today_block(day.meals, statuses, state.get("targets"))
 
 
 async def plan_meals_node(state: AgentState) -> Dict[str, Any]:
